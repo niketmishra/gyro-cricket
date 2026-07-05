@@ -1,0 +1,11 @@
+{
+  "name": "Gyro Cricket",
+  "short_name": "GyroCricket",
+  "description": "Swing your phone like a cricket bat. Six, four, or bowled, the sensors decide.",
+  "start_url": ".",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#070d1f",
+  "theme_color": "#070d1f",
+  "icons": []
+}

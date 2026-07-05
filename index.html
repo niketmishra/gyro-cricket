@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#060b1a" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<title>Gyro Cricket</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<!-- ============ SPLASH ============ -->
+<section id="screen-splash" class="screen active">
+  <div class="floodlight fl-left"></div>
+  <div class="floodlight fl-right"></div>
+  <div class="splash-inner">
+    <div class="splash-ball"><div class="splash-ball-shadow"></div></div>
+    <h1 class="logo"><span class="logo-line">GYRO</span><span class="logo-line logo-accent">CRICKET</span></h1>
+    <p class="tagline">Your phone is the bat.</p>
+    <button class="btn btn-primary btn-big btn-shine" id="btn-splash-start">ENTER THE STADIUM</button>
+    <p class="splash-foot">Best played standing up, with both hands</p>
+  </div>
+</section>
+
+<!-- ============ GRIP WARNING ============ -->
+<section id="screen-grip" class="screen">
+  <div class="panel">
+    <div class="grip-emoji">✋📱</div>
+    <h2>GRIP CHECK</h2>
+    <p class="grip-copy">You are about to swing your phone like a real cricket bat.</p>
+    <ul class="grip-list">
+      <li>🤜 Hold it TIGHT. Phones can fly, Wii-remote style.</li>
+      <li>🛋️ Clear 2 metres around you. TVs, lamps, siblings.</li>
+      <li>🧤 Sweaty hands? Wipe them. Seriously.</li>
+      <li>🐕 Keep pets out of the swing zone.</li>
+    </ul>
+    <button class="btn btn-primary btn-big" id="btn-grip-ok">I'M HOLDING TIGHT 💪</button>
+  </div>
+</section>
+
+<!-- ============ HOME MENU ============ -->
+<section id="screen-home" class="screen">
+  <div class="floodlight fl-left"></div>
+  <div class="floodlight fl-right"></div>
+  <header class="home-head">
+    <h1 class="logo logo-small"><span>GYRO</span><span class="logo-accent">CRICKET</span></h1>
+    <p class="home-sub" id="home-greeting">Night match. Full house. You're on strike.</p>
+  </header>
+  <nav class="menu">
+    <button class="menu-card" data-mode="quick">
+      <span class="menu-icon">🏏</span>
+      <span class="menu-text"><b>QUICK MATCH</b><small>2 overs, 3 wickets. Smash it.</small></span>
+      <span class="menu-go">▶</span>
+    </button>
+    <button class="menu-card" data-mode="chase">
+      <span class="menu-icon">🎯</span>
+      <span class="menu-text"><b>RUN CHASE</b><small>Chase a target off the last 2 overs.</small></span>
+      <span class="menu-go">▶</span>
+    </button>
+    <button class="menu-card" data-mode="duel">
+      <span class="menu-icon">🆚</span>
+      <span class="menu-text"><b>FRIEND DUEL</b><small>Pass the phone. Two innings. One winner.</small></span>
+      <span class="menu-go">▶</span>
+    </button>
+    <button class="menu-card" data-mode="practice">
+      <span class="menu-icon">🥅</span>
+      <span class="menu-text"><b>PRACTICE NETS</b><small>Endless balls, coach feedback on timing.</small></span>
+      <span class="menu-go">▶</span>
+    </button>
+    <button class="menu-card" data-mode="survival">
+      <span class="menu-icon">🔥</span>
+      <span class="menu-text"><b>SURVIVAL</b><small>One wicket. How long can you last?</small></span>
+      <span class="menu-go">▶</span>
+    </button>
+  </nav>
+  <div class="home-foot">
+    <button class="btn btn-ghost" id="btn-batter">🏏 MAHI</button>
+    <button class="btn btn-ghost" id="btn-howto">HOW TO PLAY</button>
+    <button class="btn btn-ghost" id="btn-settings">SETTINGS</button>
+  </div>
+  <div class="best-strip" id="best-strip"></div>
+  <div class="badge-shelf" id="badge-shelf"></div>
+</section>
+
+<!-- ============ BATTER PICKER ============ -->
+<section id="screen-batter" class="screen">
+  <div class="panel panel-scroll">
+    <h2>PICK YOUR BATTER</h2>
+    <p class="grip-copy">The 2007 dressing room is yours.</p>
+    <div class="batter-grid" id="batter-grid"></div>
+    <button class="btn btn-primary" id="btn-batter-back">DONE</button>
+  </div>
+</section>
+
+<!-- ============ FRIEND DUEL SETUP ============ -->
+<section id="screen-duel" class="screen">
+  <div class="panel">
+    <h2>FRIEND DUEL</h2>
+    <p class="grip-copy">Two batters. One phone. An innings each. Loser fetches the snacks.</p>
+    <div class="duel-row">
+      <label>PLAYER 1 · BATS FIRST</label>
+      <input id="duel-p1" maxlength="12" placeholder="Player 1" autocomplete="off" />
+    </div>
+    <div class="duel-row">
+      <label>PLAYER 2 · CHASES</label>
+      <input id="duel-p2" maxlength="12" placeholder="Player 2" autocomplete="off" />
+    </div>
+    <button class="btn btn-primary btn-big" id="btn-duel-start">START THE DUEL</button>
+    <button class="btn btn-ghost" id="btn-duel-back">BACK</button>
+  </div>
+</section>
+
+<!-- ============ DUEL HANDOVER ============ -->
+<section id="screen-handover" class="screen">
+  <div class="panel">
+    <p class="end-kicker">INNINGS BREAK</p>
+    <h2 id="handover-title">PLAYER 1 SETS 25</h2>
+    <div class="end-score" id="handover-score">24/2</div>
+    <p class="end-verdict" id="handover-sub"></p>
+    <p class="grip-copy">Hand the phone over. New batter, new grip check. Hold it TIGHT.</p>
+    <button class="btn btn-primary btn-big btn-shine" id="btn-handover-go">GOT IT, LET'S CHASE</button>
+  </div>
+</section>
+
+<!-- ============ HOW TO PLAY ============ -->
+<section id="screen-howto" class="screen">
+  <div class="panel panel-scroll">
+    <h2>HOW TO PLAY</h2>
+    <ol class="howto-list">
+      <li><b>Stand up.</b> Hold the phone in both hands like a bat handle, screen facing you.</li>
+      <li><b>Read the scout report.</b> Before each ball you see the bowler, speed, where it pitches, and which way it moves.</li>
+      <li><b>Pick your shot.</b> DEFEND protects your wicket, DRIVE finds gaps, SLOG goes for the fence but risks everything.</li>
+      <li><b>Tap I'M READY.</b> The bowler starts his run-up. About four seconds later the ball is coming at you.</li>
+      <li><b>Swing right after the bounce.</b> You'll hear a <i>thock</i> when it pitches. That sound is your trigger. Too early or too late is a clean miss.</li>
+      <li><b>Swing through the ball's line.</b> The gyro reads your real swing: a flat horizontal swipe is a pull (leg side) or cut (off side), an up-and-over swing is a straight drive. Pull a ball that's wide outside off and you will hit air.</li>
+      <li><b>Find the gaps.</b> Ring fielders stop anything hit straight at them.</li>
+    </ol>
+    <p class="howto-note">No motion sensors? Button Mode: hold to charge, release at the bounce.</p>
+    <button class="btn btn-primary" id="btn-howto-back">GOT IT</button>
+  </div>
+</section>
+
+<!-- ============ SETTINGS ============ -->
+<section id="screen-settings" class="screen">
+  <div class="panel">
+    <h2>SETTINGS</h2>
+    <div class="setting-row"><span>Sound effects</span><button class="toggle" id="set-sound" data-on="true">ON</button></div>
+    <div class="setting-row"><span>Voice commentary</span><button class="toggle" id="set-voice" data-on="true">ON</button></div>
+    <div class="setting-row"><span>Vibration</span><button class="toggle" id="set-haptics" data-on="true">ON</button></div>
+    <div class="setting-row"><span>Batting hand</span><button class="toggle" id="set-hand" data-on="true">RIGHT</button></div>
+    <div class="setting-row"><span>Difficulty</span><button class="toggle lit" id="set-difficulty" data-val="kids">KIDS</button></div>
+    <p class="setting-hint">KIDS gives a bigger timing window and friendlier fielders. PRO is real cricket pain. If your shots feel mirrored, flip the batting hand.</p>
+    <button class="btn btn-primary" id="btn-settings-back">DONE</button>
+  </div>
+</section>
+
+<!-- ============ SENSOR SETUP ============ -->
+<section id="screen-setup" class="screen">
+  <div class="panel">
+    <h2>BAT CHECK</h2>
+    <div class="setup-phone">📱</div>
+    <p id="setup-copy">Gyro Cricket needs your phone's motion sensors to feel your swing.</p>
+    <button class="btn btn-primary btn-big" id="btn-enable-motion">ENABLE MOTION SENSORS</button>
+    <button class="btn btn-ghost" id="btn-button-mode">PLAY IN BUTTON MODE INSTEAD</button>
+  </div>
+</section>
+
+<!-- ============ GAME ============ -->
+<section id="screen-game" class="screen">
+  <header class="scorebug">
+    <div class="sb-score-wrap">
+      <div class="sb-score"><span id="hud-runs">0</span><span class="sb-sep">/</span><span id="hud-wkts">0</span></div>
+      <div class="sb-overs" id="hud-overs">0.0 ov</div>
+    </div>
+    <div class="sb-mid">
+      <div class="ball-strip" id="ball-strip"></div>
+      <div class="sb-need" id="hud-target"></div>
+    </div>
+    <div class="sb-right">
+      <div class="sb-speed"><span id="hud-batspeed">--</span><small>km/h bat</small></div>
+      <div class="sb-badge sb-fire hidden" id="hud-fire">🔥 ON FIRE</div>
+      <div class="sb-badge sb-freehit hidden" id="hud-freehit">⚡ FREE HIT</div>
+    </div>
+  </header>
+
+  <div class="arena">
+    <canvas id="field"></canvas>
+    <div class="ball-cue" id="ball-cue"></div>
+    <div class="timing-chip hidden" id="timing-chip"></div>
+    <div class="result-banner hidden" id="result-banner">
+      <div class="rb-main" id="rb-main"></div>
+      <div class="rb-sub" id="rb-sub"></div>
+    </div>
+    <div class="commentary" id="commentary"></div>
+  </div>
+
+  <!-- bottom control deck -->
+  <div class="sheet" id="sheet">
+    <!-- SCOUT: next delivery report -->
+    <div class="sheet-view" id="view-scout">
+      <div class="scout-top">
+        <span class="scout-overball" id="scout-overball">OVER 1 · BALL 1</span>
+        <span class="scout-tag-freehit hidden" id="scout-freehit">⚡ FREE HIT, CANNOT BE OUT</span>
+      </div>
+      <div class="scout-bowler">
+        <span class="scout-avatar" id="scout-avatar">⚡</span>
+        <div class="scout-bowler-info">
+          <b id="scout-bowler-name">Raftaar Khan</b>
+          <small id="scout-bowler-style">Express pace</small>
+        </div>
+        <div class="scout-speed"><b id="scout-speed">0</b><small>km/h</small></div>
+      </div>
+      <p class="scout-banter" id="scout-banter"></p>
+      <div class="scout-mid">
+        <div class="mini-pitch">
+          <div class="mp-crease mp-crease-top"></div>
+          <div class="mp-crease mp-crease-bot"></div>
+          <div class="mp-dot" id="mp-dot"></div>
+          <div class="mp-arrow" id="mp-arrow">→</div>
+          <span class="mp-label mp-label-top">bowler</span>
+          <span class="mp-label mp-label-bot">you</span>
+        </div>
+        <div class="scout-tags">
+          <span class="tag tag-len" id="tag-length">GOOD LENGTH</span>
+          <span class="tag tag-line" id="tag-line">AT OFF STUMP</span>
+          <span class="tag tag-move" id="tag-move">DEAD STRAIGHT</span>
+          <p class="scout-hint" id="scout-hint">classic timing</p>
+        </div>
+      </div>
+      <div class="intent-row" id="intent-row">
+        <button class="intent" data-intent="defend"><b>🛡 DEFEND</b><small>low risk</small></button>
+        <button class="intent sel" data-intent="drive"><b>🏏 DRIVE</b><small>find gaps</small></button>
+        <button class="intent" data-intent="slog"><b>💥 SLOG</b><small>all out</small></button>
+      </div>
+      <button class="btn btn-primary btn-big btn-shine" id="btn-ready">I'M READY</button>
+    </div>
+
+    <!-- LIVE: run-up + delivery -->
+    <div class="sheet-view hidden" id="view-live">
+      <div class="runup-track"><div class="runup-fill" id="runup-fill"></div></div>
+      <div class="live-hint" id="live-hint">Bowler at the top of his mark...</div>
+      <button class="btn btn-primary btn-swing hidden" id="btn-swing">HOLD TO CHARGE</button>
+    </div>
+
+    <!-- RESULT: ball debrief -->
+    <div class="sheet-view hidden" id="view-result">
+      <div class="result-grid" id="result-grid"></div>
+      <button class="btn btn-primary btn-big" id="btn-next-ball">NEXT BALL ▶</button>
+    </div>
+
+    <!-- OVER BREAK -->
+    <div class="sheet-view hidden" id="view-break">
+      <h3 class="break-title" id="break-title">END OF OVER 1</h3>
+      <p class="break-sub" id="break-sub"></p>
+      <div class="break-bowler" id="break-bowler"></div>
+      <button class="btn btn-primary btn-big" id="btn-break-continue">CONTINUE ▶</button>
+    </div>
+  </div>
+
+  <button class="quit-x" id="btn-quit" aria-label="Quit">✕</button>
+</section>
+
+<!-- ============ MATCH END ============ -->
+<section id="screen-end" class="screen">
+  <div class="panel panel-scroll panel-end">
+    <p class="end-kicker" id="end-kicker">FULL TIME</p>
+    <h2 id="end-title">INNINGS OVER</h2>
+    <div class="end-score" id="end-score">24/3</div>
+    <p class="end-verdict" id="end-verdict"></p>
+    <div class="wheel-wrap">
+      <canvas id="wheel" width="260" height="260"></canvas>
+      <p class="wheel-caption">YOUR WAGON WHEEL</p>
+    </div>
+    <div class="end-stats" id="end-stats"></div>
+    <button class="btn btn-primary btn-big" id="btn-again">PLAY AGAIN</button>
+    <div class="end-foot">
+      <button class="btn btn-ghost" id="btn-share">SHARE 📤</button>
+      <button class="btn btn-ghost" id="btn-home">PAVILION</button>
+    </div>
+  </div>
+</section>
+
+<canvas id="fx" class="fx-canvas"></canvas>
+<div class="fire-vignette" id="fire-vignette"></div>
+<div class="toast hidden" id="toast"></div>
+
+<script type="module" src="js/game.js?v=10"></script>
+</body>
+</html>
