@@ -99,6 +99,33 @@ export function playCrack(power) {
   tone({ freq: 2400, dur: 0.03, gain: 0.3 * p, type: "square" });
 }
 
+// the bat itself cutting through the air (plays on every swing)
+export function playBatWhoosh() {
+  if (!enabled) return;
+  const c = ac();
+  const t = c.currentTime;
+  const src = c.createBufferSource();
+  src.buffer = noiseBuffer();
+  const f = c.createBiquadFilter();
+  f.type = "bandpass"; f.Q.value = 1.4;
+  f.frequency.setValueAtTime(500, t);
+  f.frequency.exponentialRampToValueAtTime(1900, t + 0.16);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.2, t + 0.07);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+  src.connect(f); f.connect(g); g.connect(master);
+  src.start(t); src.stop(t + 0.22);
+}
+
+// the sweetest sound in cricket: ball off the MIDDLE of the bat
+export function playMiddled(power = 0.8) {
+  if (!enabled) return;
+  tone({ freq: 950, freqEnd: 620, dur: 0.07, gain: 0.55 + 0.3 * power, type: "triangle" });
+  tone({ freq: 1900, freqEnd: 1450, dur: 0.13, gain: 0.16, type: "sine", when: 0.004 });
+  noiseBurst({ dur: 0.04, freq: 2600, q: 1, gain: 0.32 + 0.2 * power, type: "bandpass" });
+}
+
 // soft nick off the edge
 export function playEdge() {
   if (!enabled) return;

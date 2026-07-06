@@ -1,7 +1,7 @@
-import * as audio from "./audio.js?v=10";
-import * as sensors from "./sensors.js?v=10";
-import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS } from "./physics.js?v=10";
-import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=10";
+import * as audio from "./audio.js?v=11";
+import * as sensors from "./sensors.js?v=11";
+import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS } from "./physics.js?v=11";
+import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=11";
 
 /* ============================== settings ============================== */
 const settings = loadJSON("gyroCricketSettings", {
@@ -493,7 +493,7 @@ async function runDelivery(delivery, intent) {
   const windowEnd = tContact + effWindow * 1000 + 120;
   let swing = match.buttonMode
     ? await buttonSwing(windowEnd)
-    : await sensors.armSwing(windowStart, windowEnd, diff.threshold);
+    : await sensors.armSwing(windowStart, windowEnd, diff.threshold, tContact);
   stopTimingRing();
   if (bail()) return;
 
@@ -591,8 +591,14 @@ async function presentResult(result, swing, diff, delivery, intent) {
     audio.crowdOoh();
     setTimeout(() => audio.crowdCheer(0.75), 500);
   } else if (swing) {
-    audio.playCrack(swing.power);
-    vibrate(swing.power > 0.7 ? [40, 30, 60] : 40);
+    // contact feel: a middled ball PINGS, a thick one thuds
+    if (result.contact === "middle") {
+      audio.playMiddled(swing.power);
+      vibrate([35, 20, 70]);
+    } else {
+      audio.playCrack(swing.power * (result.contact === "thick" ? 0.55 : 1));
+      vibrate(swing.power > 0.7 ? [40, 30, 60] : 40);
+    }
     const cheer = { six: 1, four: 0.85, runs: 0.4, dot: 0.15, fielded: 0.2 }[result.kind] ?? 0.15;
     audio.crowdCheer(onFire ? Math.min(1, cheer + 0.2) : cheer);
     if (result.kind === "six") setTimeout(() => audio.crowdCheer(0.7), 1200);
@@ -749,7 +755,7 @@ function fillResultGrid(delivery, swing, result, diff, intent, flags) {
       <div class="rg-col">
         <div class="rg-head bat">BATTING · ${intent.label}</div>
         <div class="rg-line">💨 <b>${swing.batSpeedKmh}</b> km/h · ${describeSwing(swing)} · ${timing}</div>
-        <div class="rg-line">Contact <span class="rg-stars">${stars}</span></div>
+        <div class="rg-line">Contact <span class="rg-stars">${stars}</span>${result.contact === "middle" ? ' <span class="rg-perfect">MIDDLED!</span>' : ""}</div>
         <div class="rg-line">📍 ${shotLine}</div>
       </div>`;
   }
@@ -1055,6 +1061,7 @@ function triggerBatSwing(swing) {
     side: az >= 0 ? 1 : -1,
     cross: (swing.horizFrac ?? 0) > 0.5,
   };
+  audio.playBatWhoosh();
 }
 
 function drawPerspective(opts = {}) {

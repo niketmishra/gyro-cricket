@@ -1,17 +1,17 @@
 // Swing detection from the phone's accelerometer + gyroscope.
 //
-// Physics: a bat swing is a rotation. The gyroscope gives the rotation-rate
-// VECTOR in the phone frame; its direction is the swing's rotation axis and
-// its magnitude is how fast the bat is moving. Comparing that axis with
-// gravity (low-passed accelerometer) classifies the swing in the real world:
+// The detector records EVERY gyro sample inside the contact window, then
+// analyses them as swing "bursts". A real bat swing sweeps a large angle
+// (integrated rotation > ~55 degrees); a nervous pre-ball bat tap does not,
+// so waggles are rejected. When several bursts qualify, the one that is
+// biggest AND closest to the ball's arrival wins — so moving the bat before
+// the ball comes never steals the shot.
 //
-//   axis parallel to gravity      -> bat sweeping HORIZONTALLY (pull / cut),
-//                                    and the SIGN says leg side vs off side
-//   axis perpendicular to gravity -> straight-bat VERTICAL swing (drive)
-//
-// So each swing yields: when it happened (rotation peak), how hard
-// (peak rate + linear acceleration), its plane (horizFrac 0..1) and its
-// signed direction (azimuth -1..1, 0 = straight).
+// Each swing yields: when its rotation peaked (contact moment), how hard
+// (peak rate + linear acceleration), its plane (horizFrac), its signed
+// direction (azimuth: rotation axis vs gravity, -1 leg ... +1 off), and the
+// raw peak rotation rate (used by the physics to rotate the bat face when
+// you are early or late).
 
 const IOS = /iP(hone|ad|od)/.test(navigator.userAgent);
 
@@ -21,22 +21,20 @@ const state = {
   listening: false,
   armed: null,
   lastTilt: 30,
-  g: { x: 0, y: 9.8, z: 0 }, // low-passed gravity, phone frame (upright portrait default)
+  g: { x: 0, y: 9.8, z: 0 }, // low-passed gravity, phone frame
   live: { rot: 0, az: 0, t: 0 },
 };
-
-// most recent rotation sample, for drawing the live swing needle.
-// Returns zeros when the phone has been still for a beat.
-export function liveMotion() {
-  if (performance.now() - state.live.t > 160) return { rot: 0, az: 0 };
-  return state.live;
-}
 
 export function sensorsSupported() {
   return state.supported;
 }
 
-// Must be called from a user gesture on iOS.
+// most recent rotation sample, for the on-screen swing needle
+export function liveMotion() {
+  if (performance.now() - state.live.t > 160) return { rot: 0, az: 0 };
+  return state.live;
+}
+
 export async function requestMotionPermission() {
   if (!state.supported) return false;
   try {
@@ -66,8 +64,7 @@ function startListening() {
 }
 
 function onMotion(e) {
-  // keep a slow gravity estimate running at all times (iOS reports the
-  // opposite sign convention to the spec, normalize to one convention)
+  // slow gravity estimate, always running (iOS reports the opposite sign)
   const ag = e.accelerationIncludingGravity;
   if (ag && ag.x != null) {
     const s = IOS ? -1 : 1;
@@ -76,108 +73,111 @@ function onMotion(e) {
     state.g.z = state.g.z * 0.92 + s * ag.z * 0.08;
   }
 
-  // live swing feed for the on-screen swing meter
-  {
-    const r0 = e.rotationRate || {};
-    const rotNow = Math.hypot(r0.alpha || 0, r0.beta || 0, r0.gamma || 0);
-    if (rotNow > 25) {
-      const ax = norm({ x: r0.beta || 0, y: r0.gamma || 0, z: r0.alpha || 0 });
-      const gn = norm(state.g);
-      state.live = { rot: rotNow, az: ax.x * gn.x + ax.y * gn.y + ax.z * gn.z, t: performance.now() };
-    }
-  }
-
-  const a = state.armed;
-  if (!a || a.done) return;
-  const now = performance.now();
-  if (now < a.start) return;
-  // freeze the gravity reference the moment the window opens, before the
-  // swing itself pollutes the accelerometer
-  if (!a.gRef) a.gRef = norm(state.g);
-
   const r = e.rotationRate || {};
   const rot = Math.hypot(r.alpha || 0, r.beta || 0, r.gamma || 0); // deg/s
   const acc = e.acceleration
     ? Math.hypot(e.acceleration.x || 0, e.acceleration.y || 0, e.acceleration.z || 0)
     : 0;
 
-  if (rot > a.peakRot) {
-    a.peakRot = rot;
-    a.peakTime = now;
-    a.tiltAtPeak = state.lastTilt;
-    // rotation axis in phone coords: beta = about x, gamma = about y, alpha = about z
-    a.omega = { x: r.beta || 0, y: r.gamma || 0, z: r.alpha || 0 };
+  // live swing feed for the on-screen needle
+  if (rot > 25) {
+    const ax = norm({ x: r.beta || 0, y: r.gamma || 0, z: r.alpha || 0 });
+    const gn = norm(state.g);
+    state.live = { rot, az: ax.x * gn.x + ax.y * gn.y + ax.z * gn.z, t: performance.now() };
   }
-  if (acc > a.peakAcc) a.peakAcc = acc;
 
-  const swungHard = a.peakRot > a.threshold;
-  const peakPassed = swungHard && (rot < a.peakRot * 0.45 || now - a.peakTime > 280);
-  if ((peakPassed || now >= a.end) && swungHard) {
-    a.done = true;
-    a.resolve(makeSwing(a));
-  } else if (now >= a.end) {
-    a.done = true;
-    a.resolve(null); // no swing detected
-  }
+  const a = state.armed;
+  if (!a || a.done) return;
+  const now = performance.now();
+  if (now < a.start) return;
+  if (!a.gRef) a.gRef = norm(state.g); // freeze gravity before the swing pollutes it
+
+  a.samples.push({ t: now, rot, acc, rx: r.beta || 0, ry: r.gamma || 0, rz: r.alpha || 0 });
+  if (a.samples.length > 600) a.samples.shift();
 }
 
-function makeSwing(a) {
-  const axis = norm(a.omega || { x: 1, y: 0, z: 0 });
+// Split window samples into bursts and score them: a genuine swing sweeps
+// a big angle; the winner is the big burst nearest the ball's arrival.
+function analyze(a) {
+  const gateRot = Math.max(90, a.threshold * 0.55);
   const g = a.gRef || { x: 0, y: 1, z: 0 };
-  // component of the rotation axis along gravity: +/-1 = horizontal swing,
-  // 0 = vertical straight-bat swing. Sign = which way the bat swept.
-  const vert = axis.x * g.x + axis.y * g.y + axis.z * g.z;
-  const horizFrac = Math.min(1, Math.abs(vert));
-  const azimuth = Math.max(-1, Math.min(1, vert));
 
-  // Many phone gyros saturate around 500 deg/s, far below a real hard
-  // swing, so power leans on whichever sensor read higher: gyro for
-  // controlled swings, accelerometer when the gyro tops out.
-  const rotPow = clamp01((a.peakRot - a.threshold) / 460);
-  const accPow = clamp01((a.peakAcc - 4) / 22);
+  const bursts = [];
+  let cur = null;
+  for (const s of a.samples) {
+    if (s.rot > gateRot) {
+      if (!cur) cur = { t0: s.t, t1: s.t, samples: [] };
+      cur.samples.push(s);
+      cur.t1 = s.t;
+    } else if (cur) {
+      if (s.t - cur.t1 > 70) { bursts.push(cur); cur = null; }
+    }
+  }
+  if (cur) bursts.push(cur);
+
+  let best = null;
+  for (const b of bursts) {
+    let peak = 0, tPeak = 0, accPeak = 0, angle = 0, azNum = 0, azDen = 0, prevT = null;
+    for (const s of b.samples) {
+      if (s.rot > peak) { peak = s.rot; tPeak = s.t; }
+      if (s.acc > accPeak) accPeak = s.acc;
+      if (prevT != null) angle += s.rot * (s.t - prevT) / 1000; // integrated degrees
+      prevT = s.t;
+      const m = Math.hypot(s.rx, s.ry, s.rz) || 1;
+      const dot = (s.rx * g.x + s.ry * g.y + s.rz * g.z) / m;
+      azNum += dot * s.rot;
+      azDen += s.rot;
+    }
+    // waggle filter: too weak, too small a sweep, or too brief
+    if (peak < a.threshold || angle < 55 || b.t1 - b.t0 < 40) continue;
+    const score = angle * (1 - Math.min(0.6, Math.abs(tPeak - a.tContact) / 900));
+    if (!best || score > best.score) {
+      best = { score, peak, tPeak, accPeak, angle, az: azNum / Math.max(1, azDen) };
+    }
+  }
+  if (!best) return null;
+
+  const rotPow = clamp01((best.peak - a.threshold) / 460);
+  const accPow = clamp01((best.accPeak - 4) / 22);
   const power = Math.min(1, Math.max(accPow, rotPow * 0.72 + accPow * 0.45));
-
   return {
-    time: a.peakTime,
+    time: best.tPeak,
     power,
     batSpeedKmh: Math.round(28 + power * 117),
-    tilt: a.tiltAtPeak,
-    azimuth,
-    horizFrac,
+    tilt: state.lastTilt,
+    azimuth: Math.max(-1, Math.min(1, best.az)),
+    horizFrac: Math.min(1, Math.abs(best.az)),
+    rotPeak: best.peak,
+    swingAngleDeg: Math.round(best.angle),
     source: "motion",
   };
 }
 
-// Arm detection for one delivery. Resolves with a swing object or null.
-export function armSwing(windowStart, windowEnd, threshold = 220) {
+// Arm detection for one delivery. Resolves at window end with the best
+// qualifying swing burst, or null.
+export function armSwing(windowStart, windowEnd, threshold = 220, tContact = windowEnd - 250) {
   return new Promise((resolve) => {
     state.armed = {
       start: windowStart,
       end: windowEnd,
       threshold,
+      tContact,
       resolve,
-      peakRot: 0,
-      peakAcc: 0,
-      peakTime: 0,
-      tiltAtPeak: 30,
-      omega: null,
+      samples: [],
       gRef: null,
       done: false,
     };
-    // Safety timer in case motion events stop arriving. setTimeout, not rAF,
-    // so it still fires when the browser throttles animation.
     const guard = () => {
       const a = state.armed;
-      if (a && !a.done) {
-        if (performance.now() >= a.end + 120) {
-          a.done = true;
-          a.resolve(a.peakRot > a.threshold ? makeSwing(a) : null);
-        } else {
-          setTimeout(guard, 50);
-        }
+      if (!a || a.done) return;
+      if (performance.now() >= a.end + 60) {
+        a.done = true;
+        a.resolve(analyze(a));
+      } else {
+        setTimeout(guard, 40);
       }
     };
-    setTimeout(guard, 50);
+    setTimeout(guard, 40);
   });
 }
 

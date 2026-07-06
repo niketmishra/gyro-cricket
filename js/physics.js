@@ -99,7 +99,7 @@ const LENGTHS = [
 // ball. Your real swing direction must land near it or you play the wrong
 // line and miss. shotHint = the shot real batters play at it.
 const LINES = [
-  { key: "leg",     label: "at leg stump",     xOff: -0.4, reach: -0.55, shotHint: "flick it through the leg side",
+  { key: "leg",     label: "at leg stump",     xOff: -0.4, reach: -0.42, shotHint: "flick it through the leg side",
     dirNudge: -20, bowledFactor: 0.55, edgeFactor: 0.7, w: 0.17 },
   { key: "middle",  label: "at middle stump",  xOff: 0,    reach: -0.05, shotHint: "play it dead straight",
     dirNudge: -4,  bowledFactor: 1.35, edgeFactor: 0.9, w: 0.27 },
@@ -167,29 +167,7 @@ export function computeShot(swing, diff, rightHanded = true, delivery = null, in
   if (!rightHanded) az = -az;
   swing.azPlayed = az;
 
-  /* ---- 1. WRONG LINE: swing nowhere near the ball ---- */
-  // Near-perfect timing buys extra reach: good batters adjust mid-swing.
-  const mismatch = Math.abs(az - line.reach);
-  const reachLimit = 0.85 + (absErr < W * 0.4 ? 0.3 : 0);
-  if (mismatch > reachLimit) {
-    // feather on the way through
-    if (Math.random() < 0.15) {
-      if (Math.random() < 0.5) {
-        return out("edgeOut", 0, "OUT!", "edgeOut",
-          { dir: hand(160, rightHanded), dist: 12, airborne: true, hangTime: 0.6 });
-      }
-      return out("edge4", 4, "FOUR!", "edge4",
-        { dir: hand(150, rightHanded), dist: BOUNDARY + 2, airborne: false, hangTime: 0 });
-    }
-    // played all around it: straighter balls clean you up
-    if (line.key !== "outside" &&
-        Math.random() < Math.min(0.8, diff.bowledProb * 1.1 * line.bowledFactor * len.bowledFactor)) {
-      return out("bowled", 0, "OUT!", "bowled", null);
-    }
-    return out("missLine", 0, "WRONG LINE!", "missLine", null);
-  }
-
-  /* ---- 2. TIMING MISS: outside the window ---- */
+  /* ---- 1. TIMING MISS: outside the window ---- */
   if (absErr > W) {
     if (err < 0) {
       // through the shot early; full straight balls trap you in front
@@ -206,12 +184,51 @@ export function computeShot(swing, diff, rightHanded = true, delivery = null, in
     return out("missLate", 0, "TOO LATE", "missLate", null);
   }
 
-  /* ---- 3. CONTACT ---- */
-  const lineFactor = mismatch <= 0.35 ? 1 : Math.max(0.3, 1 - (mismatch - 0.35) * 0.9);
-  const quality = Math.pow(1 - absErr / W, 1.3) * lineFactor;
+  /* ---- 2. THE CONTACT MODEL: where is the bat, where is the ball ----
+     The bat sweeps an arc. Its face angle at contact = where you swung
+     (azimuth), rotated further by how early/late you were times your REAL
+     measured bat rotation rate. The blade's sweet spot covers a lateral
+     band about 1.05 m out from the hands; the ball travels on its line.
+     The gap between them, in centimetres, decides everything. */
+  const rotRate = swing.rotPeak || 500; // deg/s, from the gyro
+  const faceDeg = az * 80 + clamp(err * rotRate * 0.9, -90, 90);
+  const faceRad = (faceDeg * Math.PI) / 180;
+  const coverX = Math.sin(faceRad) * 1.05;  // where the sweet spot is (m)
+  const ballX = line.xOff * 1.15;           // where the ball is (m)
+  const offset = ballX - coverX;
+  const absOff = Math.abs(offset);
+  const tq = Math.pow(Math.max(0, 1 - absErr / W), 1.2);
+
+  // completely out of reach: played the wrong line entirely
+  if (absOff > 0.6) {
+    if (line.key !== "outside" &&
+        Math.random() < Math.min(0.8, diff.bowledProb * 1.1 * line.bowledFactor * len.bowledFactor)) {
+      return out("bowled", 0, "OUT!", "bowled", null);
+    }
+    return out("missLine", 0, "WRONG LINE!", "missLine", null);
+  }
+
+  // thin contact at the end of the blade: edges
+  if (absOff > 0.42) {
+    if (offset > 0) {
+      // outside edge, carries behind to the keeper and slips
+      if (Math.random() < 0.55) {
+        return out("edgeOut", 0, "OUT!", "edgeOut",
+          { dir: hand(150 + Math.random() * 20, rightHanded), dist: 14, airborne: true, hangTime: 0.7 });
+      }
+      return out("edge4", 4, "FOUR!", "edge4",
+        { dir: hand(140 + Math.random() * 25, rightHanded), dist: BOUNDARY + 2, airborne: false, hangTime: 0 });
+    }
+    // inside edge: chopped onto the stumps, or squirted fine for a single
+    if (Math.random() < 0.45) {
+      return out("bowled", 0, "OUT!", "bowled", null); // played on!
+    }
+    return out("runs", 1, "1 RUN", "runs1",
+      { dir: hand(-150 - Math.random() * 20, rightHanded), dist: 12, airborne: false, hangTime: 0 });
+  }
 
   // bouncer taken on too early = top edge, skied
-  if (len.key === "bouncer" && quality < 0.3 && err < -0.05 && Math.random() < 0.6) {
+  if (len.key === "bouncer" && tq < 0.3 && err < -0.05 && Math.random() < 0.5) {
     if (Math.random() < 0.55) {
       return out("caught", 0, "CAUGHT!", "caught",
         { dir: hand(-150, rightHanded), dist: 18, airborne: true, hangTime: 2.2 });
@@ -219,23 +236,30 @@ export function computeShot(swing, diff, rightHanded = true, delivery = null, in
     return out("edge4", 4, "FOUR!", "edge4",
       { dir: hand(-160, rightHanded), dist: BOUNDARY + 2, airborne: false, hangTime: 0 });
   }
-  // thin late edge: only genuinely LATE swings with poor contact, and only
-  // sometimes; wider lines edge a little more often
-  if (err > W * 0.6 && quality < 0.3 && Math.random() < 0.5 * line.edgeFactor) {
-    if (Math.random() < 0.5) {
-      return out("edgeOut", 0, "OUT!", "edgeOut",
-        { dir: hand(160, rightHanded), dist: 12, airborne: true, hangTime: 0.6 });
-    }
-    return out("edge4", 4, "FOUR!", "edge4",
-      { dir: hand(150, rightHanded), dist: BOUNDARY + 2, airborne: false, hangTime: 0 });
-  }
 
-  // ball speed off the bat: real swing speed, damped by contact quality
+  // contact grade from the offset, in real bat terms
+  const offQ = absOff <= 0.14 ? 1 : absOff <= 0.3 ? 0.82 : 0.55;
+  const quality = tq * offQ;
+  const middled = offQ === 1 && tq > 0.85;
+  const contact = middled ? "middle" : offQ >= 0.8 ? "solid" : "thick";
+
+  // direction: EXACTLY where the bat face sent it. Off-centre contact
+  // deflects it further, movement drags scratchy shots, and there is no
+  // clamp: late cuts, glances, everything behind square is real.
+  let dir =
+    faceDeg +
+    offset * 40 +
+    move.dirShift * (0.25 + 0.75 * (1 - quality)) +
+    (Math.random() * 10 - 5) * (1.15 - quality);
+  dir = ((dir + 540) % 360) - 180;
+  dir = hand(dir, rightHanded);
+  const glance = Math.abs(dir) > 105; // deflections carry less of the blow
+
+  // ball speed off the bat
   const paceBonus = delivery ? 0.9 + ((delivery.kmh - 70) / 78) * 0.18 : 1;
   const baseSpeed = (13 + swing.power * 29) * paceBonus * (len.powerMul || 1) * (intent.power || 1);
-  // out of the MIDDLE of the bat: near-perfect contact pings harder
-  const sweet = quality > 0.9 ? 1.12 : quality > 0.8 ? 1.05 : 1;
-  const speed = baseSpeed * (0.38 + 0.62 * quality) * sweet;
+  const sweet = middled ? 1.12 : quality > 0.8 ? 1.05 : 1;
+  const speed = baseSpeed * (0.38 + 0.62 * quality) * sweet * (glance ? 0.72 : 1);
 
   // launch angle: cross-bat shots travel flat, straight-bat drives can loft
   let angle;
@@ -250,14 +274,7 @@ export function computeShot(swing, diff, rightHanded = true, delivery = null, in
   if (len.angleCap) angle = Math.min(angle, len.angleCap);
   if (intent.angleCap) angle = Math.min(angle, intent.angleCap);
 
-  // direction: where you swung, bent by timing and movement off the pitch
-  // clean contact places the ball where you aimed; scratchy contact sprays
-  let dir =
-    az * 85 +
-    err * 110 +
-    move.dirShift * (0.3 + 0.7 * (1 - quality)) +
-    (Math.random() * 12 - 6) * (1.25 - quality);
-  dir = hand(clamp(dir, -160, 160), rightHanded);
+  const finish = (r) => { r.contact = contact; r.quality = quality; return r; };
 
   const rad = (angle * Math.PI) / 180;
   const airborne = angle > 14;
@@ -268,7 +285,7 @@ export function computeShot(swing, diff, rightHanded = true, delivery = null, in
   const hangTime = airborne ? (2 * speed * Math.sin(rad)) / 9.81 : 0;
 
   if (airborne && dist >= BOUNDARY) {
-    return out("six", 6, "SIX!", "six", { dir, dist: Math.min(dist, 92), airborne, hangTime });
+    return finish(out("six", 6, "SIX!", "six", { dir, dist: Math.min(dist, 92), airborne, hangTime }));
   }
 
   if (airborne && hangTime > 1.15) {
@@ -277,15 +294,15 @@ export function computeShot(swing, diff, rightHanded = true, delivery = null, in
       return d < best.d ? { f, d } : best;
     }, { f: null, d: 1e9 });
     if (nearest.d < 9 && Math.random() < (diff.catchProb + (len.catchAdd || 0) + (nearest.d < 4 ? 0.3 : 0)) * (intent.catch || 1)) {
-      return out("caught", 0, "CAUGHT!", "caught", { dir, dist, airborne: true, hangTime });
+      return finish(out("caught", 0, "CAUGHT!", "caught", { dir, dist, airborne: true, hangTime }));
     }
   }
 
-  // ground shots must beat the ring fielders
+  // ground shots must beat the ring fielders (angles wrap for glances)
   let intercepted = null;
   if (!airborne) {
     for (const f of FIELDERS) {
-      const ad = Math.abs(dir - f.dir);
+      const ad = Math.abs(angDiff(dir, f.dir));
       if (ad < 12 && f.dist < dist + 3 && (!intercepted || f.dist < intercepted.f.dist)) {
         intercepted = { f, ad };
       }
@@ -293,22 +310,26 @@ export function computeShot(swing, diff, rightHanded = true, delivery = null, in
   }
   if (intercepted) {
     const runs = intercepted.ad < 6 ? 0 : 1;
-    return out(runs === 0 ? "fielded" : "runs", runs, runs === 0 ? "NO RUN" : "1 RUN",
+    return finish(out(runs === 0 ? "fielded" : "runs", runs, runs === 0 ? "NO RUN" : "1 RUN",
       runs === 0 ? "fielded" : "runs1",
-      { dir, dist: Math.min(dist, intercepted.f.dist), airborne: false, hangTime: 0 });
+      { dir, dist: Math.min(dist, intercepted.f.dist), airborne: false, hangTime: 0 }));
   }
   if (!airborne && dist >= BOUNDARY * 0.62) {
-    return out("four", 4, "FOUR!", "four", { dir, dist: BOUNDARY + 2, airborne: false, hangTime: 0 });
+    return finish(out("four", 4, "FOUR!", "four", { dir, dist: BOUNDARY + 2, airborne: false, hangTime: 0 }));
   }
 
   let runs = 0;
   if (dist >= 45) runs = 3;
   else if (dist >= 26) runs = 2;
   else if (dist >= 10) runs = 1;
-  return out(runs === 0 ? "dot" : "runs", runs,
+  return finish(out(runs === 0 ? "dot" : "runs", runs,
     runs === 0 ? "NO RUN" : `${runs} RUN${runs > 1 ? "S" : ""}`,
     runs === 0 ? "dot" : `runs${runs}`,
-    { dir, dist, airborne, hangTime });
+    { dir, dist, airborne, hangTime }));
+}
+
+function angDiff(a, b) {
+  return ((a - b + 540) % 360) - 180;
 }
 
 function out(kind, runs, banner, commentaryKey, flight) {
