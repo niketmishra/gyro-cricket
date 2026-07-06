@@ -1,13 +1,15 @@
-import * as audio from "./audio.js?v=11";
-import * as sensors from "./sensors.js?v=11";
-import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS } from "./physics.js?v=11";
-import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=11";
+import * as audio from "./audio.js?v=12";
+import * as sensors from "./sensors.js?v=12";
+import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS } from "./physics.js?v=12";
+import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=12";
 
 /* ============================== settings ============================== */
 const settings = loadJSON("gyroCricketSettings", {
   sound: true, voice: true, haptics: true, rightHanded: true, difficulty: "normal", intent: "drive",
-  gyroFlip: false, batter: "kholi",
+  gyroFlip: false, gyroSign: 0, timingBias: 0, batter: "kholi",
 });
+// migrate the old boolean flip into the calibration sign
+if (settings.gyroFlip && !settings.gyroSign) { settings.gyroSign = -1; }
 if (!settings.v2) {
   settings.v2 = true;
   if (settings.difficulty === "kids") settings.difficulty = "normal";
@@ -199,6 +201,14 @@ function bindToggle(id, initial, onChange, labels = ["ON", "OFF"]) {
   });
 }
 
+$("set-recal").addEventListener("click", () => {
+  settings.gyroSign = 0;
+  settings.timingBias = 0;
+  saveSettings();
+  audio.playUiClick();
+  toast("🧭 Calibration reset. You'll shadow-swing before the next match.");
+});
+
 /* mode select */
 document.querySelectorAll(".menu-card").forEach((card) => {
   card.addEventListener("click", () => {
@@ -216,13 +226,45 @@ function launchPending() {
 $("btn-enable-motion").addEventListener("click", async () => {
   audio.unlockAudio();
   const ok = await sensors.requestMotionPermission();
-  if (ok) { match.buttonMode = false; startMatch(pendingMode); }
+  if (ok) {
+    match.buttonMode = false;
+    if (!settings.gyroSign) return runCalibration();
+    startMatch(pendingMode);
+  }
   else {
     $("setup-copy").textContent =
       "Could not get motion access. On iPhone allow Motion and Orientation in Safari settings, or play in Button Mode.";
   }
 });
 $("btn-button-mode").addEventListener("click", () => { match.buttonMode = true; startMatch(pendingMode); });
+
+/* one-time grip calibration: a single shadow swing toward the OFF side
+   teaches us which way your phone's gyro reads, whatever way you hold it */
+async function runCalibration() {
+  const copy = $("setup-copy");
+  const b1 = $("btn-enable-motion"), b2 = $("btn-button-mode");
+  b1.classList.add("hidden"); b2.classList.add("hidden");
+  for (let attempt = 0; attempt < 3; attempt++) {
+    copy.innerHTML = "🏏 <b>SHADOW SWING!</b> Hold the phone ANY way that feels like a bat. Now play ONE practice shot toward the <b>OFF side</b> (a right-hander's right).";
+    const sw = await sensors.captureSwing(8000, 170);
+    if (sw) {
+      settings.gyroSign = (sw.azimuth || 0) >= 0 ? 1 : -1;
+      settings.gyroFlip = false;
+      saveSettings();
+      copy.textContent = "Locked in! Grip calibrated. Walking out to the middle...";
+      audio.playClaps();
+      await wait(1000);
+      b1.classList.remove("hidden"); b2.classList.remove("hidden");
+      return startMatch(pendingMode);
+    }
+    copy.textContent = "No swing felt. Give it a real shadow swing, like you mean it!";
+    await wait(1100);
+  }
+  settings.gyroSign = 1;
+  saveSettings();
+  b1.classList.remove("hidden"); b2.classList.remove("hidden");
+  startMatch(pendingMode);
+}
 
 /* duel setup */
 $("btn-duel-back").addEventListener("click", () => { audio.playUiClick(); goHome(); });
@@ -466,14 +508,14 @@ async function runDelivery(delivery, intent) {
   hint.textContent = `${delivery.bowler.name} charging in...`;
   audio.playRunup(2.9);
 
+  // count-in scheduled on the AUDIO clock: sample-accurate, no jitter
   const tContactPred = t0 + T_RUNUP + (delivery.toBounce + delivery.toBat) * 1000;
   [[2000, "•"], [1000, "• •"], [0, null]].forEach(([msBefore, dots]) => {
     const d = tContactPred - msBefore - performance.now();
-    if (d > 0) setTimeout(() => {
-      if (bail()) return;
-      audio.playTick(msBefore === 0);
-      if (dots && !match.freeHit) setCue(dots);
-    }, d);
+    if (d > 0) {
+      audio.playTick(msBefore === 0, d / 1000);
+      if (dots) setTimeout(() => { if (!bail() && !match.freeHit) setCue(dots); }, d);
+    }
   });
 
   await wait(T_RUNUP - 1300);
@@ -486,7 +528,8 @@ async function runDelivery(delivery, intent) {
   const tRelease = performance.now();
   const tBounce = tRelease + delivery.toBounce * 1000;
   const tContact = tBounce + delivery.toBat * 1000;
-  setTimeout(() => { audio.playBounce(); setCue("SWING!", true); vibrate(30); }, delivery.toBounce * 1000);
+  audio.playBounce(delivery.toBounce); // audio-clock precise
+  setTimeout(() => { setCue("SWING!", true); vibrate(30); }, delivery.toBounce * 1000);
   startTimingRing(tRelease, tBounce, tContact);
 
   const windowStart = tContact - effWindow * 1000 - 150;
@@ -504,8 +547,13 @@ async function runDelivery(delivery, intent) {
     $("hud-batspeed").textContent = swing.batSpeedKmh;
     match.stats.bestBat = Math.max(match.stats.bestBat, swing.batSpeedKmh);
     showTimingChip(swing.timingErr);
-    if (swing.source === "motion" && settings.gyroFlip && swing.azimuth != null) {
-      swing.azimuth = -swing.azimuth;
+    if (swing.source === "motion" && swing.azimuth != null) {
+      swing.azimuth *= settings.gyroSign || 1;
+    }
+    if (swing.source === "motion") {
+      // rhythm-game latency correction: remove this device's constant lag
+      swing.timingErr -= settings.timingBias || 0;
+      learnTimingBias(swing.timingErr, effWindow);
     }
   }
 
@@ -515,6 +563,20 @@ async function runDelivery(delivery, intent) {
   await presentResult(result, swing, diff, delivery, intent);
 
   function bail() { return match.over || !$("screen-game").classList.contains("active"); }
+}
+
+/* --------- device latency auto-learning --------- */
+const biasHist = [];
+function learnTimingBias(err, W) {
+  if (Math.abs(err) > W * 1.6) return; // only genuine attempts teach us
+  biasHist.push(err);
+  if (biasHist.length > 9) biasHist.shift();
+  if (biasHist.length >= 5 && biasHist.length % 3 === 0) {
+    const sorted = [...biasHist].sort((a, b) => a - b);
+    const med = sorted[Math.floor(sorted.length / 2)];
+    settings.timingBias = Math.max(-0.12, Math.min(0.12, (settings.timingBias || 0) + med * 0.3));
+    saveSettings();
+  }
 }
 
 /* --------- swing-direction auto-calibration --------- */
@@ -528,7 +590,7 @@ function learnCalibration(swing, delivery) {
   if (calibHist.length > 8) calibHist.shift();
   const s = calibHist.reduce((a, b) => a + b, 0);
   if (s >= 4) {
-    settings.gyroFlip = !settings.gyroFlip;
+    settings.gyroSign = -(settings.gyroSign || 1);
     saveSettings();
     calibHist.length = 0;
     setTimeout(() => setCommentary("🧭 Swing direction auto-calibrated to your grip."), 2600);
@@ -1779,7 +1841,7 @@ function drawSwingGauge(w, h) {
   if (!match.buttonMode) {
     const lm = sensors.liveMotion();
     if (lm.rot > 60) {
-      let azv = lm.az * (settings.gyroFlip ? -1 : 1);
+      let azv = lm.az * (settings.gyroSign || 1);
       if (!settings.rightHanded) azv = -azv;
       const tip = toXY(Math.max(-1, Math.min(1, azv)), R - 14);
       fctx.save();

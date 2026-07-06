@@ -94,6 +94,17 @@ function onMotion(e) {
 
   a.samples.push({ t: now, rot, acc, rx: r.beta || 0, ry: r.gamma || 0, rz: r.alpha || 0 });
   if (a.samples.length > 600) a.samples.shift();
+
+  // calibration mode: finish as soon as one clean burst has completed
+  if (a.resolveOnBurst) {
+    if (a.lastT != null) a.angleAcc = (a.angleAcc || 0) + rot * (now - a.lastT) / 1000;
+    a.lastT = now;
+    if (rot > (a.maxRot || 0)) a.maxRot = rot;
+    if (a.maxRot > a.threshold && (a.angleAcc || 0) > 60 && rot < a.threshold * 0.4) {
+      a.done = true;
+      a.resolve(analyze(a));
+    }
+  }
 }
 
 // Split window samples into bursts and score them: a genuine swing sweeps
@@ -130,9 +141,18 @@ function analyze(a) {
     }
     // waggle filter: too weak, too small a sweep, or too brief
     if (peak < a.threshold || angle < 55 || b.t1 - b.t0 < 40) continue;
-    const score = angle * (1 - Math.min(0.6, Math.abs(tPeak - a.tContact) / 900));
+    // stable contact anchor: the raw rotation peak drifts with swing shape,
+    // so blend it with the moment the bat has swept 40% of its arc
+    let cum = 0, t40 = tPeak, prevT2 = null;
+    for (const s of b.samples) {
+      if (prevT2 != null) cum += s.rot * (s.t - prevT2) / 1000;
+      prevT2 = s.t;
+      if (cum >= angle * 0.4) { t40 = s.t; break; }
+    }
+    const tSwing = tPeak * 0.5 + t40 * 0.5;
+    const score = angle * (1 - Math.min(0.6, Math.abs(tSwing - a.tContact) / 900));
     if (!best || score > best.score) {
-      best = { score, peak, tPeak, accPeak, angle, az: azNum / Math.max(1, azDen) };
+      best = { score, peak, tSwing, accPeak, angle, az: azNum / Math.max(1, azDen) };
     }
   }
   if (!best) return null;
@@ -141,7 +161,7 @@ function analyze(a) {
   const accPow = clamp01((best.accPeak - 4) / 22);
   const power = Math.min(1, Math.max(accPow, rotPow * 0.72 + accPow * 0.45));
   return {
-    time: best.tPeak,
+    time: best.tSwing,
     power,
     batSpeedKmh: Math.round(28 + power * 117),
     tilt: state.lastTilt,
@@ -179,6 +199,16 @@ export function armSwing(windowStart, windowEnd, threshold = 220, tContact = win
     };
     setTimeout(guard, 40);
   });
+}
+
+// one-shot practice-swing capture for grip calibration; resolves as soon
+// as a genuine swing burst completes (or null after the timeout)
+export function captureSwing(durMs = 8000, threshold = 170) {
+  const start = performance.now();
+  const p = armSwing(start, start + durMs, threshold, start + durMs / 2);
+  const a = state.armed;
+  if (a) a.resolveOnBurst = true;
+  return p;
 }
 
 export function disarm() {

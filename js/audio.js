@@ -65,10 +65,10 @@ function tone({ freq = 440, freqEnd = null, dur = 0.15, gain = 0.3, type = "sine
 // ---- game sounds ----
 
 // ball pitching on the ground: low thump + dusty slap
-export function playBounce() {
+export function playBounce(when = 0) {
   if (!enabled) return;
-  tone({ freq: 160, freqEnd: 55, dur: 0.12, gain: 0.7, type: "sine" });
-  noiseBurst({ dur: 0.06, freq: 400, q: 0.7, gain: 0.35 });
+  tone({ freq: 160, freqEnd: 55, dur: 0.12, gain: 0.7, type: "sine", when });
+  noiseBurst({ dur: 0.06, freq: 400, q: 0.7, gain: 0.35, when });
 }
 
 // ball released from the hand
@@ -167,9 +167,10 @@ export function playHorn() {
 }
 
 // count-in metronome tick; accent lands exactly on the ideal contact moment
-export function playTick(accent = false) {
+export function playTick(accent = false, when = 0) {
   if (!enabled) return;
-  tone({ freq: accent ? 1568 : 1046, dur: 0.06, gain: accent ? 0.34 : 0.2, type: "square" });
+  // `when` schedules on the audio clock: sample-accurate, no setTimeout jitter
+  tone({ freq: accent ? 1568 : 1046, dur: 0.06, gain: accent ? 0.34 : 0.2, type: "square", when });
 }
 
 // dhol-style clap burst for fire streaks and badge unlocks
