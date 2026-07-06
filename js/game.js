@@ -1,7 +1,7 @@
-import * as audio from "./audio.js?v=12";
-import * as sensors from "./sensors.js?v=12";
-import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS } from "./physics.js?v=12";
-import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=12";
+import * as audio from "./audio.js?v=13";
+import * as sensors from "./sensors.js?v=13";
+import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS } from "./physics.js?v=13";
+import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=13";
 
 /* ============================== settings ============================== */
 const settings = loadJSON("gyroCricketSettings", {
@@ -2260,7 +2260,8 @@ function shuffle(a) {
 function describeSwing(swing) {
   if (swing.source === "button") return "button swing";
   const az = swing.azPlayed ?? swing.azimuth ?? 0;
-  if ((swing.horizFrac ?? 0) < 0.4) return "straight-bat swing";
+  const az2 = Math.abs(az);
+  if ((swing.horizFrac ?? 0) < 0.25 && az2 < 0.18) return "straight-bat swing";
   return az < 0 ? "cross-bat to LEG" : "cross-bat to OFF";
 }
 function moveArrow(d) {

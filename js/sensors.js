@@ -128,19 +128,35 @@ function analyze(a) {
 
   let best = null;
   for (const b of bursts) {
-    let peak = 0, tPeak = 0, accPeak = 0, angle = 0, azNum = 0, azDen = 0, prevT = null;
+    let peak = 0, tPeak = 0, accPeak = 0, angle = 0, prevT = null;
     for (const s of b.samples) {
       if (s.rot > peak) { peak = s.rot; tPeak = s.t; }
       if (s.acc > accPeak) accPeak = s.acc;
       if (prevT != null) angle += s.rot * (s.t - prevT) / 1000; // integrated degrees
       prevT = s.t;
-      const m = Math.hypot(s.rx, s.ry, s.rz) || 1;
-      const dot = (s.rx * g.x + s.ry * g.y + s.rz * g.z) / m;
-      azNum += dot * s.rot;
-      azDen += s.rot;
     }
     // waggle filter: too weak, too small a sweep, or too brief
     if (peak < a.threshold || angle < 55 || b.t1 - b.t0 < 40) continue;
+
+    // Direction from the HITTING PHASE only. The backswing rotates the
+    // opposite way to the downswing; averaging both cancels the signal and
+    // everything reads as a straight bat. So: take samples near the peak
+    // whose rotation sense matches the peak's, and average those.
+    const dotOf = (s) => {
+      const m = Math.hypot(s.rx, s.ry, s.rz) || 1;
+      return (s.rx * g.x + s.ry * g.y + s.rz * g.z) / m;
+    };
+    let peakDot = 0;
+    for (const s of b.samples) if (s.t === tPeak) { peakDot = dotOf(s); break; }
+    const sense = Math.sign(peakDot) || 1;
+    let azNum = 0, azDen = 0;
+    for (const s of b.samples) {
+      if (Math.abs(s.t - tPeak) > 170) continue;
+      const d = dotOf(s);
+      if (Math.sign(d) !== sense && Math.abs(d) > 0.15) continue; // backswing residue
+      azNum += d * s.rot;
+      azDen += s.rot;
+    }
     // stable contact anchor: the raw rotation peak drifts with swing shape,
     // so blend it with the moment the bat has swept 40% of its arc
     let cum = 0, t40 = tPeak, prevT2 = null;
@@ -165,8 +181,8 @@ function analyze(a) {
     power,
     batSpeedKmh: Math.round(28 + power * 117),
     tilt: state.lastTilt,
-    azimuth: Math.max(-1, Math.min(1, best.az)),
-    horizFrac: Math.min(1, Math.abs(best.az)),
+    azimuth: Math.max(-1, Math.min(1, best.az * 1.25)),
+    horizFrac: Math.min(1, Math.abs(best.az * 1.25)),
     rotPeak: best.peak,
     swingAngleDeg: Math.round(best.angle),
     source: "motion",
