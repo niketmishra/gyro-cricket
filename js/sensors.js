@@ -79,11 +79,14 @@ function onMotion(e) {
     ? Math.hypot(e.acceleration.x || 0, e.acceleration.y || 0, e.acceleration.z || 0)
     : 0;
 
-  // live swing feed for the on-screen needle
+  // live swing feed for the on-screen needle.
+  // Physics: rotation-axis-dot-up > 0 means the bat sweeps counterclockwise
+  // seen from above, i.e. toward LEG for a right hander. Internally
+  // positive = OFF, hence the negation.
   if (rot > 25) {
     const ax = norm({ x: r.beta || 0, y: r.gamma || 0, z: r.alpha || 0 });
     const gn = norm(state.g);
-    state.live = { rot, az: ax.x * gn.x + ax.y * gn.y + ax.z * gn.z, t: performance.now() };
+    state.live = { rot, az: -(ax.x * gn.x + ax.y * gn.y + ax.z * gn.z), t: performance.now() };
   }
 
   const a = state.armed;
@@ -181,7 +184,7 @@ function analyze(a) {
     power,
     batSpeedKmh: Math.round(28 + power * 117),
     tilt: state.lastTilt,
-    azimuth: Math.max(-1, Math.min(1, best.az * 1.25)),
+    azimuth: Math.max(-1, Math.min(1, -best.az * 1.25)), // omega·up>0 = LEG; internal +. = OFF
     horizFrac: Math.min(1, Math.abs(best.az * 1.25)),
     rotPeak: best.peak,
     swingAngleDeg: Math.round(best.angle),

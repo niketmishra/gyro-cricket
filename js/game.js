@@ -1,7 +1,7 @@
-import * as audio from "./audio.js?v=13";
-import * as sensors from "./sensors.js?v=13";
-import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS } from "./physics.js?v=13";
-import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=13";
+import * as audio from "./audio.js?v=14";
+import * as sensors from "./sensors.js?v=14";
+import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS } from "./physics.js?v=14";
+import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=14";
 
 /* ============================== settings ============================== */
 const settings = loadJSON("gyroCricketSettings", {
@@ -10,6 +10,12 @@ const settings = loadJSON("gyroCricketSettings", {
 });
 // migrate the old boolean flip into the calibration sign
 if (settings.gyroFlip && !settings.gyroSign) { settings.gyroSign = -1; }
+// the sensor sign convention changed in v14: recalibrate once
+if (settings.calibV !== 2) {
+  settings.calibV = 2;
+  settings.gyroSign = 0;
+  localStorage.setItem("gyroCricketSettings", JSON.stringify(settings));
+}
 if (!settings.v2) {
   settings.v2 = true;
   if (settings.difficulty === "kids") settings.difficulty = "normal";
@@ -587,9 +593,9 @@ function learnCalibration(swing, delivery) {
   const mmRaw = Math.abs(swing.azPlayed - reach);
   const mmFlip = Math.abs(-swing.azPlayed - reach);
   calibHist.push(mmFlip < mmRaw - 0.2 ? 1 : mmRaw < mmFlip - 0.2 ? -1 : 0);
-  if (calibHist.length > 8) calibHist.shift();
+  if (calibHist.length > 6) calibHist.shift();
   const s = calibHist.reduce((a, b) => a + b, 0);
-  if (s >= 4) {
+  if (s >= 3) {
     settings.gyroSign = -(settings.gyroSign || 1);
     saveSettings();
     calibHist.length = 0;
@@ -1992,8 +1998,9 @@ function animateHitPersp(flight) {
     const trail = [];
     const step = () => {
       const t = Math.min(1, (performance.now() - t0) / dur);
+      const x0 = currentDelivery ? markerXm(currentDelivery) * 0.85 : 0.15;
       const ball = {
-        x: 0.15 + (X - 0.15) * t,
+        x: x0 + (X - x0) * t,
         y: 0.8 + yPk * Math.sin(Math.min(1, t) * Math.PI * 0.55),
         z: 2 + (Z - 2) * t,
       };
