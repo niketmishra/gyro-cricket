@@ -1,7 +1,7 @@
-import * as audio from "./audio.js?v=14";
-import * as sensors from "./sensors.js?v=14";
-import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS } from "./physics.js?v=14";
-import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=14";
+import * as audio from "./audio.js?v=15";
+import * as sensors from "./sensors.js?v=15";
+import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS } from "./physics.js?v=15";
+import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=15";
 
 /* ============================== settings ============================== */
 const settings = loadJSON("gyroCricketSettings", {
@@ -759,6 +759,7 @@ function bannerSub(result, swing, delivery) {
     case "edgeOut": return "thin edge, keeper takes it";
     case "beaten": return "beaten all ends up";
     case "dot": return `dead-batted to ${regionName(f.dir)}`;
+    case "mistime": return "off the splice, no timing";
     case "missLine": return `ball was ${delivery.line.label}, bat went the other way`;
     case "missEarly": return "swing finished before the ball arrived";
     case "missLate": return "the ball beat the bat";

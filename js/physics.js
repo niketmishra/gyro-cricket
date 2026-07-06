@@ -169,6 +169,13 @@ export function computeShot(swing, diff, rightHanded = true, delivery = null, in
 
   /* ---- 1. TIMING MISS: outside the window ---- */
   if (absErr > W) {
+    // a real swing only JUST out: the bat still clips it off the splice
+    if (absErr <= W * 1.3 && swing.power > 0.35) {
+      const d0 = hand(clamp((az >= 0 ? 1 : -1) * 30 + err * 120, -60, 60), rightHanded);
+      const r1 = Math.random() < 0.25 ? 1 : 0;
+      return out(r1 ? "runs" : "mistime", r1, r1 ? "1 RUN" : "MISTIMED", r1 ? "runs1" : "mistime",
+        { dir: d0, dist: 4 + Math.random() * 6, airborne: false, hangTime: 0 });
+    }
     if (err < 0) {
       // through the shot early; full straight balls trap you in front
       if ((line.key === "leg" || line.key === "middle") &&
@@ -184,47 +191,53 @@ export function computeShot(swing, diff, rightHanded = true, delivery = null, in
     return out("missLate", 0, "TOO LATE", "missLate", null);
   }
 
-  /* ---- 2. THE CONTACT MODEL: where is the bat, where is the ball ----
-     The bat sweeps an arc. Its face angle at contact = where you swung
-     (azimuth), rotated further by how early/late you were times your REAL
-     measured bat rotation rate. The blade's sweet spot covers a lateral
-     band about 1.05 m out from the hands; the ball travels on its line.
-     The gap between them, in centimetres, decides everything. */
-  const rotRate = swing.rotPeak || 500; // deg/s, from the gyro
-  const faceDeg = az * 80 + clamp(err * rotRate * 0.9, -90, 90);
+  /* ---- 2. THE CONTACT MODEL, tuned for how a real swing feels ----
+     Direction comes from WHERE you swung, almost purely. Timing decides
+     how sweetly it comes off. The ball's line drags the shot and trims
+     quality; it only causes an air-swing when your timing was poor too,
+     because a batter in position gets bat on ball. */
+  const rotRate = swing.rotPeak || 500;
+  // response curve: moderate side-swipes still reach square positions
+  const swingAng = Math.sign(az) * Math.min(85, Math.pow(Math.abs(az), 0.8) * 95);
+  const faceDeg = swingAng + clamp(err * rotRate * 0.35, -35, 35);
   const faceRad = (faceDeg * Math.PI) / 180;
-  const coverX = Math.sin(faceRad) * 1.05;  // where the sweet spot is (m)
-  const ballX = line.xOff * 1.15;           // where the ball is (m)
+  const coverX = Math.sin(faceRad) * 1.05;  // sweet-spot reach (m)
+  const ballX = line.xOff * 1.15;           // ball's line (m)
   const offset = ballX - coverX;
   const absOff = Math.abs(offset);
-  const tq = Math.pow(Math.max(0, 1 - absErr / W), 1.2);
+  // generous plateau: within 80 ms is pure timing bliss
+  const tq = absErr <= 0.08 ? 1 : Math.pow(Math.max(0, 1 - (absErr - 0.08) / Math.max(0.05, W - 0.08)), 1.1);
 
-  // completely out of reach: played the wrong line entirely
-  if (absOff > 0.6) {
-    if (line.key !== "outside" &&
-        Math.random() < Math.min(0.8, diff.bowledProb * 1.1 * line.bowledFactor * len.bowledFactor)) {
-      return out("bowled", 0, "OUT!", "bowled", null);
-    }
-    return out("missLine", 0, "WRONG LINE!", "missLine", null);
-  }
-
-  // thin contact at the end of the blade: edges
-  if (absOff > 0.42) {
-    if (offset > 0) {
-      // outside edge, carries behind to the keeper and slips
-      if (Math.random() < 0.55) {
-        return out("edgeOut", 0, "OUT!", "edgeOut",
-          { dir: hand(150 + Math.random() * 20, rightHanded), dist: 14, airborne: true, hangTime: 0.7 });
+  let offQ, drag;
+  if (absOff > 0.65) {
+    if (tq > 0.75) {
+      // great timing rescues a stretched reach: scrappy but bat on ball
+      offQ = 0.45;
+      drag = Math.sign(offset) * 25;
+    } else if (Math.random() < 0.4) {
+      if (offset > 0) {
+        if (Math.random() < 0.55) {
+          return out("edgeOut", 0, "OUT!", "edgeOut",
+            { dir: hand(150 + Math.random() * 20, rightHanded), dist: 14, airborne: true, hangTime: 0.7 });
+        }
+        return out("edge4", 4, "FOUR!", "edge4",
+          { dir: hand(140 + Math.random() * 25, rightHanded), dist: BOUNDARY + 2, airborne: false, hangTime: 0 });
       }
-      return out("edge4", 4, "FOUR!", "edge4",
-        { dir: hand(140 + Math.random() * 25, rightHanded), dist: BOUNDARY + 2, airborne: false, hangTime: 0 });
+      if (Math.random() < 0.45) {
+        return out("bowled", 0, "OUT!", "bowled", null); // inside edge, played on
+      }
+      return out("runs", 1, "1 RUN", "runs1",
+        { dir: hand(-150 - Math.random() * 20, rightHanded), dist: 12, airborne: false, hangTime: 0 });
+    } else {
+      if (line.key !== "outside" &&
+          Math.random() < Math.min(0.75, diff.bowledProb * line.bowledFactor * len.bowledFactor)) {
+        return out("bowled", 0, "OUT!", "bowled", null);
+      }
+      return out("missLine", 0, "WRONG LINE!", "missLine", null);
     }
-    // inside edge: chopped onto the stumps, or squirted fine for a single
-    if (Math.random() < 0.45) {
-      return out("bowled", 0, "OUT!", "bowled", null); // played on!
-    }
-    return out("runs", 1, "1 RUN", "runs1",
-      { dir: hand(-150 - Math.random() * 20, rightHanded), dist: 12, airborne: false, hangTime: 0 });
+  } else {
+    offQ = absOff <= 0.25 ? 1 : absOff <= 0.45 ? 0.85 : 0.6;
+    drag = offset * 30;
   }
 
   // bouncer taken on too early = top edge, skied
@@ -237,37 +250,37 @@ export function computeShot(swing, diff, rightHanded = true, delivery = null, in
       { dir: hand(-160, rightHanded), dist: BOUNDARY + 2, airborne: false, hangTime: 0 });
   }
 
-  // contact grade from the offset, in real bat terms
-  const offQ = absOff <= 0.14 ? 1 : absOff <= 0.3 ? 0.82 : 0.55;
-  const quality = tq * offQ;
-  const middled = offQ === 1 && tq > 0.85;
-  const contact = middled ? "middle" : offQ >= 0.8 ? "solid" : "thick";
+  // a committed swing always sends the ball SOMEWHERE worth watching
+  let quality = tq * offQ;
+  if (swing.power > 0.55 && quality < 0.3) quality = 0.3;
+  const middled = tq > 0.86 && absOff <= 0.25;
+  const contact = middled ? "middle" : quality >= 0.65 ? "solid" : "thick";
 
-  // direction: EXACTLY where the bat face sent it. Off-centre contact
-  // deflects it further, movement drags scratchy shots, and there is no
-  // clamp: late cuts, glances, everything behind square is real.
+  // direction: the swing rules; drag, movement and scratch-noise nudge
   let dir =
     faceDeg +
-    offset * 40 +
+    drag +
     move.dirShift * (0.25 + 0.75 * (1 - quality)) +
-    (Math.random() * 10 - 5) * (1.15 - quality);
+    (Math.random() * 9 - 4.5) * (1.1 - quality);
   dir = ((dir + 540) % 360) - 180;
   dir = hand(dir, rightHanded);
-  const glance = Math.abs(dir) > 105; // deflections carry less of the blow
+  const glance = Math.abs(dir) > 105;
 
   // ball speed off the bat
   const paceBonus = delivery ? 0.9 + ((delivery.kmh - 70) / 78) * 0.18 : 1;
   const baseSpeed = (13 + swing.power * 29) * paceBonus * (len.powerMul || 1) * (intent.power || 1);
-  const sweet = middled ? 1.12 : quality > 0.8 ? 1.05 : 1;
+  const sweet = middled ? 1.18 : quality > 0.8 ? 1.06 : 1;
   const speed = baseSpeed * (0.38 + 0.62 * quality) * sweet * (glance ? 0.72 : 1);
 
-  // launch angle: cross-bat shots travel flat, straight-bat drives can loft
+  // launch angle: cross-bat flat, straight-bat drives loft. A hard,
+  // well-timed vertical hack is a GUARANTEED lofted straight hit.
   let angle;
   if ((swing.horizFrac ?? 0.4) > 0.5) {
     angle = 7 + swing.power * 16 + (len.angleAdd || 0) * 1.2;
   } else {
     const tiltAngle = Math.min(80, Math.abs(swing.tilt ?? 30));
     angle = 9 + (tiltAngle / 80) * 34 + (len.angleAdd || 0);
+    if (swing.power > 0.5) angle = Math.max(angle, 18 + swing.power * 16);
   }
   angle += (intent.angleAdd || 0) + (Math.random() * 8 - 4);
   if (swing.power > 0.8 && quality > 0.75 && intent.key !== "defend") angle = Math.max(angle, 21);

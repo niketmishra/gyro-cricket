@@ -176,8 +176,8 @@ function analyze(a) {
   }
   if (!best) return null;
 
-  const rotPow = clamp01((best.peak - a.threshold) / 460);
-  const accPow = clamp01((best.accPeak - 4) / 22);
+  const rotPow = clamp01((best.peak - a.threshold) / 400);
+  const accPow = clamp01((best.accPeak - 4) / 20);
   const power = Math.min(1, Math.max(accPow, rotPow * 0.72 + accPow * 0.45));
   return {
     time: best.tSwing,

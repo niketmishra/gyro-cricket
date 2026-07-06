@@ -51,6 +51,12 @@ const LINES = {
     "Fresh air! The keeper collects, {bowl} smiles.",
     "{bat} went fishing and caught nothing!",
   ],
+  mistime: [
+    "Squirts off the toe end! Nearly chopped it on!",
+    "Mistimed! It dies in the pitch.",
+    "Off the splice, drops dead at his feet.",
+    "All bat handle, no middle!",
+  ],
   missLine: [
     "He's played all around it! Completely the wrong line!",
     "Swung across the line and hit nothing but night air!",
