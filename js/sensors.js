@@ -199,11 +199,10 @@ function analyze(a) {
   }
 
   // ---- DIRECTION + TIMING from the fused-orientation trajectory ----
-  // Judge the shot by the ENTIRE swing: find every sustained rotation run
-  // in the whole window, pick the downswing (fast, big, near the ball's
-  // arrival — the backswing is slower and earlier, so it loses), and the
-  // shot direction is that run's full start-to-end travel. Because it is
-  // pure relative motion, stance errors cannot touch it.
+  // THE USER'S ALGORITHM, verbatim: the shot is the NET movement from the
+  // initial position to the end position of the swing episode. Pulling the
+  // phone back before coming through cancels itself out of the net
+  // (-30 back + 100 through = +70 forward). No run-picking, no guessing.
   let shotDeg = null, swingTime = null, runMag = 0;
   if (a.stance && state.oriOk) {
     const k = bestAxis(a.stance);
@@ -223,49 +222,46 @@ function analyze(a) {
       prev = u;
     }
     if (series.length > 6) {
-      // find every sustained monotonic run
-      const runs = [];
-      let i = 1;
-      while (i < series.length) {
-        const dt0 = (series[i].t - series[i - 1].t) / 1000 || 0.016;
-        const v0 = (series[i].A - series[i - 1].A) / dt0;
-        if (Math.abs(v0) <= 45) { i++; continue; }
-        const dir = Math.sign(v0);
-        const i0 = i - 1;
-        let j = i, slow = 0, peakVel = Math.abs(v0);
-        while (j < series.length) {
-          const dt = (series[j].t - series[j - 1].t) / 1000 || 0.016;
-          const v = (series[j].A - series[j - 1].A) / dt;
-          if (Math.sign(v) === dir && Math.abs(v) > 45) {
-            slow = 0;
-            if (Math.abs(v) > peakVel) peakVel = Math.abs(v);
-          } else if (++slow > 3) break;
-          j++;
+      // mark activity (|angular velocity| above quiet), merge gaps < 250ms
+      // into EPISODES; the episode nearest the ball's arrival is the swing
+      const episodes = [];
+      let ep = null;
+      for (let i = 1; i < series.length; i++) {
+        const dt = (series[i].t - series[i - 1].t) / 1000 || 0.016;
+        const vel = Math.abs(series[i].A - series[i - 1].A) / dt;
+        if (vel > 35) {
+          if (ep && series[i].t - ep.tLast > 250) { episodes.push(ep); ep = null; }
+          if (!ep) ep = { i0: i - 1, i1: i, tLast: series[i].t };
+          ep.i1 = i;
+          ep.tLast = series[i].t;
         }
-        const i1 = Math.min(j - 1, series.length - 1);
-        const delta = series[i1].A - series[i0].A;
-        if (Math.abs(delta) >= 20) {
-          runs.push({
-            i0, i1, delta, peakVel,
-            tMid: (series[i0].t + series[i1].t) / 2,
-          });
+      }
+      if (ep) episodes.push(ep);
+      let swingEp = null, bestD = Infinity;
+      for (const e2 of episodes) {
+        const t0 = series[e2.i0].t, t1 = series[e2.i1].t;
+        const d = a.tContact >= t0 && a.tContact <= t1
+          ? 0
+          : Math.min(Math.abs(a.tContact - t0), Math.abs(a.tContact - t1));
+        if (d < bestD) { bestD = d; swingEp = e2; }
+      }
+      if (swingEp) {
+        const i0 = swingEp.i0, i1 = swingEp.i1;
+        // NET: end position minus initial position
+        const net = series[i1].A - series[i0].A;
+        if (Math.abs(net) >= 12) {
+          runMag = Math.abs(net);
+          shotDeg = Math.max(-170, Math.min(170, net * 0.85));
+          // timing: the FORWARD part — deepest pullback point to the end
+          let iRev = i0, ext = series[i0].A;
+          for (let m = i0; m <= i1; m++) {
+            if (net > 0 ? series[m].A < ext : series[m].A > ext) {
+              ext = series[m].A; iRev = m;
+            }
+          }
+          const tRev = series[iRev].t, tEnd = series[i1].t;
+          swingTime = tEnd > tRev ? tRev + 0.45 * (tEnd - tRev) : tRev;
         }
-        i = Math.max(j, i + 1);
-      }
-      // the downswing: big, FAST, and close to when the ball arrives
-      let bestRun = null, bestScore = 0;
-      for (const r2 of runs) {
-        const score = Math.abs(r2.delta) *
-          (1 - Math.min(0.65, Math.abs(r2.tMid - a.tContact) / 1100)) *
-          (0.6 + 0.4 * Math.min(1, r2.peakVel / 400));
-        if (score > bestScore) { bestScore = score; bestRun = r2; }
-      }
-      if (bestRun) {
-        runMag = Math.abs(bestRun.delta);
-        const tRev = series[bestRun.i0].t, tEnd = series[bestRun.i1].t;
-        swingTime = tRev + 0.45 * (tEnd - tRev);
-        // the shot = the whole swing's travel
-        shotDeg = Math.max(-170, Math.min(170, bestRun.delta * 0.85));
       }
     }
   }
