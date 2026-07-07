@@ -1,7 +1,7 @@
-import * as audio from "./audio.js?v=16";
-import * as sensors from "./sensors.js?v=16";
-import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS } from "./physics.js?v=16";
-import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=16";
+import * as audio from "./audio.js?v=17";
+import * as sensors from "./sensors.js?v=17";
+import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS, idealShotDeg } from "./physics.js?v=17";
+import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=17";
 
 /* ============================== settings ============================== */
 const settings = loadJSON("gyroCricketSettings", {
@@ -253,8 +253,9 @@ async function runCalibration() {
   for (let attempt = 0; attempt < 3; attempt++) {
     copy.innerHTML = "🏏 <b>SHADOW SWING!</b> Hold the phone ANY way that feels like a bat. Now play ONE practice shot toward the <b>OFF side</b> (a right-hander's right).";
     const sw = await sensors.captureSwing(8000, 170);
-    if (sw && Math.abs(sw.azimuth || 0) >= 0.3) {
-      settings.gyroSign = sw.azimuth >= 0 ? 1 : -1;
+    const calDeg = sw ? (sw.swingDirDeg ?? (sw.azimuth || 0) * 90) : 0;
+    if (sw && Math.abs(calDeg) >= 25) {
+      settings.gyroSign = calDeg >= 0 ? 1 : -1;
       settings.gyroFlip = false;
       saveSettings();
       copy.textContent = "Locked in! That read clearly as your OFF side. Walking out to the middle...";
@@ -420,6 +421,12 @@ function prepareNextBall(first = false) {
   $("tag-line").textContent = d.line.label.toUpperCase();
   $("tag-move").textContent = `${moveArrow(d)} ${d.move.label.toUpperCase()}`;
   $("scout-hint").textContent = `"${d.length.hint}, ${d.line.shotHint}"`;
+  {
+    const idealRaw = idealShotDeg(d);
+    const ideal = settings.rightHanded ? idealRaw : -idealRaw;
+    const side = idealRaw < -6 ? "LEG" : idealRaw > 6 ? "OFF" : "STRAIGHT";
+    $("tag-target").textContent = `🎯 BEST LINE: ${regionName(ideal).toUpperCase()} · ${Math.abs(Math.round(idealRaw))}° ${side}`;
+  }
 
   const bnt = BANTER[d.bowler.id];
   if (bnt) {
@@ -557,8 +564,10 @@ async function runDelivery(delivery, intent) {
     $("hud-batspeed").textContent = swing.batSpeedKmh;
     match.stats.bestBat = Math.max(match.stats.bestBat, swing.batSpeedKmh);
     showTimingChip(swing.timingErr);
-    if (swing.source === "motion" && swing.azimuth != null) {
-      swing.azimuth *= settings.gyroSign || 1;
+    if (swing.source === "motion") {
+      const sgn = settings.gyroSign || 1;
+      if (swing.azimuth != null) swing.azimuth *= sgn;
+      if (swing.swingDirDeg != null) swing.swingDirDeg *= sgn;
     }
     if (swing.source === "motion") {
       // rhythm-game latency correction: remove this device's constant lag
@@ -831,7 +840,7 @@ function fillResultGrid(delivery, swing, result, diff, intent, flags) {
       <div class="rg-col">
         <div class="rg-head bat">BATTING · ${intent.label}</div>
         <div class="rg-line">💨 <b>${swing.batSpeedKmh}</b> km/h · ${describeSwing(swing)} · ${timing}</div>
-        <div class="rg-line"><small>Swing read: ${swing.swingAng != null ? (swing.swingAng < -8 ? "LEG" : swing.swingAng > 8 ? "OFF" : "STRAIGHT") + " " + Math.abs(Math.round(swing.swingAng)) + "°" : "n/a"}</small></div>
+        <div class="rg-line"><small>Swing read: ${swing.swingAng != null ? (swing.swingAng < -8 ? "LEG" : swing.swingAng > 8 ? "OFF" : "STRAIGHT") + " " + Math.abs(Math.round(swing.swingAng)) + "°" : "n/a"} · target ${Math.round(idealShotDeg(delivery))}°</small></div>
         <div class="rg-line">Contact <span class="rg-stars">${stars}</span>${result.contact === "middle" ? ' <span class="rg-perfect">MIDDLED!</span>' : ""}</div>
         <div class="rg-line">📍 ${shotLine}</div>
       </div>`;
@@ -1843,12 +1852,12 @@ function drawSwingGauge(w, h) {
   fctx.textAlign = "center";
   fctx.fillText("LEG", gx - R - 2, gy - 12);
   fctx.fillText("OFF", gx + R + 2, gy - 12);
-  const toXY = (az, len) => {
-    const ang = (az * 80 * Math.PI) / 180;
+  const toXY = (deg, len) => {
+    const ang = (deg * Math.PI) / 180;
     return { x: gx + Math.sin(ang) * len, y: gy - Math.cos(ang) * len };
   };
   if (currentDelivery) {
-    const ideal = (settings.rightHanded ? 1 : -1) * currentDelivery.line.reach;
+    const ideal = (settings.rightHanded ? 1 : -1) * idealShotDeg(currentDelivery);
     const p1 = toXY(ideal, R - 9), p2 = toXY(ideal, R + 9);
     fctx.strokeStyle = "#ffd54a";
     fctx.lineWidth = 4;
@@ -1857,9 +1866,9 @@ function drawSwingGauge(w, h) {
   if (!match.buttonMode) {
     const lm = sensors.liveMotion();
     if (lm.rot > 60) {
-      let azv = lm.az * (settings.gyroSign || 1);
+      let azv = -(lm.yaw || 0) * 0.22 * (settings.gyroSign || 1); // deg/s -> display degrees
       if (!settings.rightHanded) azv = -azv;
-      const tip = toXY(Math.max(-1, Math.min(1, azv)), R - 14);
+      const tip = toXY(Math.max(-100, Math.min(100, azv)), R - 14);
       fctx.save();
       fctx.shadowColor = "rgba(182,255,59,.9)";
       fctx.shadowBlur = 10;
@@ -2297,10 +2306,9 @@ function shuffle(a) {
 }
 function describeSwing(swing) {
   if (swing.source === "button") return "button swing";
-  const az = swing.azPlayed ?? swing.azimuth ?? 0;
-  const az2 = Math.abs(az);
-  if ((swing.horizFrac ?? 0) < 0.25 && az2 < 0.18) return "straight-bat swing";
-  return az < 0 ? "cross-bat to LEG" : "cross-bat to OFF";
+  const d = swing.swingDirDeg ?? (swing.azimuth ?? 0) * 90;
+  if (Math.abs(d) < 12) return "straight-bat swing";
+  return d < 0 ? "cross-bat to LEG" : "cross-bat to OFF";
 }
 function moveArrow(d) {
   if (!d.move.dirShift) return "·";

@@ -198,7 +198,9 @@ export function computeShot(swing, diff, rightHanded = true, delivery = null, in
      because a batter in position gets bat on ball. */
   const rotRate = swing.rotPeak || 500;
   // response curve: moderate side-swipes still reach square positions
-  const swingAng = Math.sign(az) * Math.min(95, Math.pow(Math.abs(az), 0.7) * 105);
+  const swingAng = swing.swingDirDeg != null
+    ? clamp(swing.swingDirDeg, -115, 115)
+    : Math.sign(az) * Math.min(95, Math.pow(Math.abs(az), 0.7) * 105);
   const faceDeg = swingAng + clamp(err * rotRate * 0.35, -35, 35);
   swing.swingAng = swingAng; // exposed so the UI can show what we read
   swing.faceDeg = faceDeg;
@@ -360,6 +362,13 @@ export function regionName(dir) {
   let best = REGIONS[0];
   for (const r of REGIONS) if (Math.abs(dir - r[0]) < Math.abs(dir - best[0])) best = r;
   return best[1];
+}
+
+// the geometrically ideal shot line for a delivery: where a clean hit
+// goes when the bat's sweet spot meets the ball's actual position
+export function idealShotDeg(delivery) {
+  const bx = delivery.line.xOff * 1.15;
+  return (Math.asin(Math.max(-1, Math.min(1, bx / 1.05))) * 180) / Math.PI;
 }
 
 export function fielderPositions() {

@@ -31,7 +31,7 @@ export function sensorsSupported() {
 
 // most recent rotation sample, for the on-screen swing needle
 export function liveMotion() {
-  if (performance.now() - state.live.t > 160) return { rot: 0, az: 0 };
+  if (performance.now() - state.live.t > 160) return { rot: 0, az: 0, yaw: 0 };
   return state.live;
 }
 
@@ -84,9 +84,9 @@ function onMotion(e) {
   // seen from above, i.e. toward LEG for a right hander. Internally
   // positive = OFF, hence the negation.
   if (rot > 25) {
-    const ax = norm({ x: r.beta || 0, y: r.gamma || 0, z: r.alpha || 0 });
     const gn = norm(state.g);
-    state.live = { rot, az: -(ax.x * gn.x + ax.y * gn.y + ax.z * gn.z), t: performance.now() };
+    const yawRate = (r.beta || 0) * gn.x + (r.gamma || 0) * gn.y + (r.alpha || 0) * gn.z;
+    state.live = { rot, yaw: yawRate, az: Math.max(-1, Math.min(1, -yawRate / 350)), t: performance.now() };
   }
 
   const a = state.armed;
@@ -141,25 +141,6 @@ function analyze(a) {
     // waggle filter: too weak, too small a sweep, or too brief
     if (peak < a.threshold || angle < 55 || b.t1 - b.t0 < 40) continue;
 
-    // Direction from the HITTING PHASE only. The backswing rotates the
-    // opposite way to the downswing; averaging both cancels the signal and
-    // everything reads as a straight bat. So: take samples near the peak
-    // whose rotation sense matches the peak's, and average those.
-    const dotOf = (s) => {
-      const m = Math.hypot(s.rx, s.ry, s.rz) || 1;
-      return (s.rx * g.x + s.ry * g.y + s.rz * g.z) / m;
-    };
-    let peakDot = 0;
-    for (const s of b.samples) if (s.t === tPeak) { peakDot = dotOf(s); break; }
-    const sense = Math.sign(peakDot) || 1;
-    let azNum = 0, azDen = 0;
-    for (const s of b.samples) {
-      if (Math.abs(s.t - tPeak) > 170) continue;
-      const d = dotOf(s);
-      if (Math.sign(d) !== sense && Math.abs(d) > 0.15) continue; // backswing residue
-      azNum += d * s.rot;
-      azDen += s.rot;
-    }
     // stable contact anchor: the raw rotation peak drifts with swing shape,
     // so blend it with the moment the bat has swept 40% of its arc
     let cum = 0, t40 = tPeak, prevT2 = null;
@@ -169,9 +150,27 @@ function analyze(a) {
       if (cum >= angle * 0.4) { t40 = s.t; break; }
     }
     const tSwing = tPeak * 0.5 + t40 * 0.5;
+
+    // THE DIRECTION, done right: yaw-rate = omega·up is the horizontal
+    // component of rotation in deg/s. Integrating it across the downswing
+    // gives the REAL horizontal arc the bat swept, in signed degrees.
+    // A 70-degree cut reads as ~70 degrees. Vertical drives read ~0.
+    // (positive sweep = counterclockwise from above = toward LEG for a
+    // right hander; internal convention is positive = OFF, so negate.)
+    let sweep = 0, prevS = null;
+    for (const s of b.samples) {
+      if (s.t < t40 - 80 || s.t > tSwing + 130) { prevS = null; continue; }
+      if (prevS) {
+        const yawRate = s.rx * g.x + s.ry * g.y + s.rz * g.z; // deg/s, signed
+        sweep += yawRate * (s.t - prevS.t) / 1000;
+      }
+      prevS = s;
+    }
+    const swingDirDeg = Math.max(-115, Math.min(115, -sweep * 0.75));
+
     const score = angle * (1 - Math.min(0.6, Math.abs(tSwing - a.tContact) / 900));
     if (!best || score > best.score) {
-      best = { score, peak, tSwing, accPeak, angle, az: azNum / Math.max(1, azDen) };
+      best = { score, peak, tSwing, accPeak, angle, swingDirDeg, sweep };
     }
   }
   if (!best) return null;
@@ -184,8 +183,9 @@ function analyze(a) {
     power,
     batSpeedKmh: Math.round(28 + power * 117),
     tilt: state.lastTilt,
-    azimuth: Math.max(-1, Math.min(1, -best.az * 1.25)), // omega·up>0 = LEG; internal +. = OFF
-    horizFrac: Math.min(1, Math.abs(best.az * 1.25)),
+    swingDirDeg: best.swingDirDeg,
+    azimuth: Math.max(-1, Math.min(1, best.swingDirDeg / 90)),
+    horizFrac: Math.min(1, Math.abs(best.sweep) / Math.max(40, best.angle)),
     rotPeak: best.peak,
     swingAngleDeg: Math.round(best.angle),
     source: "motion",
