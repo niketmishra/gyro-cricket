@@ -256,3 +256,23 @@ export function crowdGasp() {
 export function unlockAudio() {
   ac();
 }
+
+// Mobile browsers suspend the AudioContext behind our back (screen off,
+// TTS stealing the audio session, tab switch). Commentary keeps working
+// because speechSynthesis is a separate engine, so the game sounds die
+// silently. Cure: resume on every meaningful gesture and lifecycle event.
+export function ensureRunning() {
+  const c = ac();
+  if (c.state !== "running") { try { c.resume(); } catch (_) {} }
+}
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && ctx && ctx.state !== "running") ctx.resume().catch(() => {});
+  });
+  window.addEventListener("pointerdown", () => {
+    if (ctx && ctx.state !== "running") ctx.resume().catch(() => {});
+  }, { passive: true, capture: true });
+  window.addEventListener("focus", () => {
+    if (ctx && ctx.state !== "running") ctx.resume().catch(() => {});
+  });
+}

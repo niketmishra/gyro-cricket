@@ -198,8 +198,10 @@ export function computeShot(swing, diff, rightHanded = true, delivery = null, in
      because a batter in position gets bat on ball. */
   const rotRate = swing.rotPeak || 500;
   // response curve: moderate side-swipes still reach square positions
-  const swingAng = Math.sign(az) * Math.min(85, Math.pow(Math.abs(az), 0.8) * 95);
+  const swingAng = Math.sign(az) * Math.min(95, Math.pow(Math.abs(az), 0.7) * 105);
   const faceDeg = swingAng + clamp(err * rotRate * 0.35, -35, 35);
+  swing.swingAng = swingAng; // exposed so the UI can show what we read
+  swing.faceDeg = faceDeg;
   const faceRad = (faceDeg * Math.PI) / 180;
   const coverX = Math.sin(faceRad) * 1.05;  // sweet-spot reach (m)
   const ballX = line.xOff * 1.15;           // ball's line (m)
@@ -237,7 +239,7 @@ export function computeShot(swing, diff, rightHanded = true, delivery = null, in
     }
   } else {
     offQ = absOff <= 0.25 ? 1 : absOff <= 0.45 ? 0.85 : 0.6;
-    drag = offset * 30;
+    drag = offset * 22;
   }
 
   // bouncer taken on too early = top edge, skied
@@ -260,8 +262,8 @@ export function computeShot(swing, diff, rightHanded = true, delivery = null, in
   let dir =
     faceDeg +
     drag +
-    move.dirShift * (0.25 + 0.75 * (1 - quality)) +
-    (Math.random() * 9 - 4.5) * (1.1 - quality);
+    move.dirShift * (0.2 + 0.5 * (1 - quality)) +
+    (Math.random() * 7 - 3.5) * (1.1 - quality);
   dir = ((dir + 540) % 360) - 180;
   dir = hand(dir, rightHanded);
   const glance = Math.abs(dir) > 105;

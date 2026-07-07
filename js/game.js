@@ -1,7 +1,7 @@
-import * as audio from "./audio.js?v=15";
-import * as sensors from "./sensors.js?v=15";
-import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS } from "./physics.js?v=15";
-import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=15";
+import * as audio from "./audio.js?v=16";
+import * as sensors from "./sensors.js?v=16";
+import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS } from "./physics.js?v=16";
+import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=16";
 
 /* ============================== settings ============================== */
 const settings = loadJSON("gyroCricketSettings", {
@@ -253,18 +253,20 @@ async function runCalibration() {
   for (let attempt = 0; attempt < 3; attempt++) {
     copy.innerHTML = "🏏 <b>SHADOW SWING!</b> Hold the phone ANY way that feels like a bat. Now play ONE practice shot toward the <b>OFF side</b> (a right-hander's right).";
     const sw = await sensors.captureSwing(8000, 170);
-    if (sw) {
-      settings.gyroSign = (sw.azimuth || 0) >= 0 ? 1 : -1;
+    if (sw && Math.abs(sw.azimuth || 0) >= 0.3) {
+      settings.gyroSign = sw.azimuth >= 0 ? 1 : -1;
       settings.gyroFlip = false;
       saveSettings();
-      copy.textContent = "Locked in! Grip calibrated. Walking out to the middle...";
+      copy.textContent = "Locked in! That read clearly as your OFF side. Walking out to the middle...";
       audio.playClaps();
-      await wait(1000);
+      await wait(1100);
       b1.classList.remove("hidden"); b2.classList.remove("hidden");
       return startMatch(pendingMode);
     }
-    copy.textContent = "No swing felt. Give it a real shadow swing, like you mean it!";
-    await wait(1100);
+    copy.textContent = sw
+      ? "Felt it, but it read too straight to trust. Sweep FLAT across your body, like a big pull shot, toward the OFF side."
+      : "No swing felt. Give it a real shadow swing, like you mean it!";
+    await wait(1300);
   }
   settings.gyroSign = 1;
   saveSettings();
@@ -385,6 +387,7 @@ function prepareNextBall(first = false) {
   markerVisible = true;
   runupState.active = false;
   batReadyP = 0;
+  lastSwingDir = null;
   startMarkerLoop();
 
   const ballInOver = (match.balls % 6) + 1;
@@ -450,6 +453,7 @@ function prepareNextBall(first = false) {
 
 $("btn-ready").addEventListener("click", () => {
   if (!match.nextDelivery || match.over) return;
+  audio.ensureRunning(); // heal a suspended context before the soundscape
   audio.playUiClick();
   runDelivery(match.nextDelivery, INTENTS[intentKey]);
 });
@@ -714,6 +718,9 @@ async function presentResult(result, swing, diff, delivery, intent) {
 
   // staging: swing-and-miss beat, or contact flash + perspective launch,
   // then the top-down broadcast replay
+  lastSwingDir = swing && swing.swingAng != null
+    ? (settings.rightHanded ? swing.swingAng : -swing.swingAng)
+    : null;
   if (swing && !result.flight) await missBeat(delivery);
   if (result.flight) {
     if (swing && Math.abs(result.flight.dir) <= 75) await animateHitPersp(result.flight);
@@ -824,6 +831,7 @@ function fillResultGrid(delivery, swing, result, diff, intent, flags) {
       <div class="rg-col">
         <div class="rg-head bat">BATTING · ${intent.label}</div>
         <div class="rg-line">💨 <b>${swing.batSpeedKmh}</b> km/h · ${describeSwing(swing)} · ${timing}</div>
+        <div class="rg-line"><small>Swing read: ${swing.swingAng != null ? (swing.swingAng < -8 ? "LEG" : swing.swingAng > 8 ? "OFF" : "STRAIGHT") + " " + Math.abs(Math.round(swing.swingAng)) + "°" : "n/a"}</small></div>
         <div class="rg-line">Contact <span class="rg-stars">${stars}</span>${result.contact === "middle" ? ' <span class="rg-perfect">MIDDLED!</span>' : ""}</div>
         <div class="rg-line">📍 ${shotLine}</div>
       </div>`;
@@ -1120,6 +1128,7 @@ const STARS = Array.from({ length: 42 }, (_, i) => ({
 const HOARD_TEXT = ["GYRO", "SIX!!", "CRICKET", "SWING", "HOWZAT", "PREMIUM"];
 const HOARD_COLS = ["#8dd63c", "#3aa7e0", "#e0b93a", "#d05468"];
 
+let lastSwingDir = null; // handed swing angle, drawn on the replay
 let batAnim = null;   // { t0, dur, side, cross }
 let batReadyP = 0;    // 0..1 delivery progress: drives the batter's backlift
 function triggerBatSwing(swing) {
@@ -2148,6 +2157,27 @@ function drawScene(ballPt = null, trail = [], landing = null) {
     dot(p.x, p.y, 4, "#f2f6ff");
     fctx.beginPath(); fctx.arc(p.x, p.y, 6.5, 0, Math.PI * 2);
     fctx.strokeStyle = "rgba(242,246,255,.22)"; fctx.lineWidth = 1; fctx.stroke();
+  }
+
+  // dashed lime arrow = the swing WE READ from your gyro. If the gold ball
+  // path differs, the gap is drag/edge/movement, not misreading.
+  if (lastSwingDir != null) {
+    const a2 = (lastSwingDir * Math.PI) / 180;
+    const sx2 = cx + Math.sin(a2) * R * 0.42, sy2 = cy - Math.cos(a2) * R * 0.42;
+    fctx.save();
+    fctx.setLineDash([6, 6]);
+    fctx.strokeStyle = "rgba(182,255,59,.75)";
+    fctx.lineWidth = 3;
+    fctx.beginPath(); fctx.moveTo(cx, cy); fctx.lineTo(sx2, sy2); fctx.stroke();
+    fctx.setLineDash([]);
+    const ah = 9;
+    fctx.beginPath();
+    fctx.moveTo(sx2, sy2);
+    fctx.lineTo(sx2 - Math.sin(a2 + 0.4) * ah, sy2 + Math.cos(a2 + 0.4) * ah);
+    fctx.moveTo(sx2, sy2);
+    fctx.lineTo(sx2 - Math.sin(a2 - 0.4) * ah, sy2 + Math.cos(a2 - 0.4) * ah);
+    fctx.stroke();
+    fctx.restore();
   }
 
   if (trail.length > 1) {

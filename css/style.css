@@ -623,3 +623,59 @@ body.fire .fire-vignette { opacity: 1; }
 .arena.flash-six::after { background: radial-gradient(70% 60% at 50% 45%, rgba(182,255,59,.22), transparent 70%); }
 .arena.flash-four::after { background: radial-gradient(70% 60% at 50% 45%, rgba(255,213,74,.2), transparent 70%); }
 @keyframes boundFlash { from { opacity: 1; } to { opacity: 0; } }
+
+
+/* ============================================================
+   UI polish pass: mode identities, richer surfaces
+   ============================================================ */
+.menu-label {
+  z-index: 1;
+  color: var(--ink-dim);
+  font-size: 10.5px; font-weight: 700; letter-spacing: .22em;
+  margin-bottom: 2px;
+}
+.menu-card { --mc: rgba(255,255,255,.08); --mcb: var(--stroke); }
+.menu-card[data-mode="quick"]    { --mc: rgba(182,255,59,.16); --mcb: rgba(182,255,59,.35); }
+.menu-card[data-mode="chase"]    { --mc: rgba(255,213,74,.16); --mcb: rgba(255,213,74,.35); }
+.menu-card[data-mode="duel"]     { --mc: rgba(255,77,109,.16); --mcb: rgba(255,77,109,.35); }
+.menu-card[data-mode="practice"] { --mc: rgba(77,201,255,.16); --mcb: rgba(77,201,255,.35); }
+.menu-card[data-mode="survival"] { --mc: rgba(255,140,50,.16); --mcb: rgba(255,140,50,.35); }
+.menu-card .menu-icon {
+  width: 46px; height: 46px; flex: none;
+  display: grid; place-items: center;
+  font-size: 23px;
+  border-radius: 14px;
+  background: linear-gradient(160deg, var(--mc), transparent 75%);
+  border: 1px solid var(--mcb);
+}
+.menu-card:active { border-color: var(--mcb); background: linear-gradient(90deg, var(--mc), transparent); }
+
+/* intents get their cricket identities */
+.intent[data-intent="defend"].sel { border-color: var(--sky); background: rgba(77,201,255,.12); box-shadow: 0 0 18px rgba(77,201,255,.15); }
+.intent[data-intent="defend"].sel b { color: var(--sky); }
+.intent[data-intent="slog"].sel { border-color: var(--hot); background: rgba(255,77,109,.12); box-shadow: 0 0 18px rgba(255,77,109,.15); }
+.intent[data-intent="slog"].sel b { color: var(--hot); }
+
+/* scorebug: glass pill for the score */
+.sb-score-wrap {
+  background: rgba(255,255,255,.055);
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  padding: 5px 10px 6px;
+}
+
+/* richer control deck surface */
+.sheet {
+  background: linear-gradient(180deg, rgba(15,25,52,.92), rgba(8,13,29,.97));
+  backdrop-filter: blur(14px);
+  border-top: 1px solid rgba(255,255,255,.14);
+}
+#btn-ready { animation: readyGlow 1.6s ease-in-out infinite; }
+@keyframes readyGlow {
+  0%, 100% { box-shadow: 0 10px 28px rgba(182,255,59,.32), inset 0 1px 0 rgba(255,255,255,.5); }
+  50% { box-shadow: 0 10px 40px rgba(182,255,59,.55), inset 0 1px 0 rgba(255,255,255,.5); }
+}
+
+/* scout tags: small identity dots */
+.tag { display: inline-flex; align-items: center; gap: 6px; }
+.tag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .8; }
