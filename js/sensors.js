@@ -246,21 +246,26 @@ function analyze(a) {
         if (d < bestD) { bestD = d; swingEp = e2; }
       }
       if (swingEp) {
-        const i0 = swingEp.i0, i1 = swingEp.i1;
-        // NET: end position minus initial position
-        const net = series[i1].A - series[i0].A;
-        if (Math.abs(net) >= 12) {
-          runMag = Math.abs(net);
-          shotDeg = Math.max(-170, Math.min(170, net * 0.85));
-          // timing: the FORWARD part — deepest pullback point to the end
-          let iRev = i0, ext = series[i0].A;
-          for (let m = i0; m <= i1; m++) {
-            if (net > 0 ? series[m].A < ext : series[m].A > ext) {
-              ext = series[m].A; iRev = m;
-            }
-          }
-          const tRev = series[iRev].t, tEnd = series[i1].t;
-          swingTime = tEnd > tRev ? tRev + 0.45 * (tEnd - tRev) : tRev;
+        // trim to the INTENTIONAL zone: the swing that plays the ball must
+        // surround its arrival. Settling motion long before, and bringing
+        // the bat back to rest after the follow-through, are cut away.
+        let i0 = swingEp.i0, i1 = swingEp.i1;
+        while (i0 < i1 && series[i0].t < a.tContact - 1200) i0++;
+        while (i1 > i0 && series[i1].t > a.tContact + 550) i1--;
+        // the swing's own turning points: deepest pull-back and the
+        // follow-through PEAK (maximum excursion), in time order
+        let iMin = i0, iMax = i0;
+        for (let m = i0; m <= i1; m++) {
+          if (series[m].A < series[iMin].A) iMin = m;
+          if (series[m].A > series[iMax].A) iMax = m;
+        }
+        const iA = Math.min(iMin, iMax), iB = Math.max(iMin, iMax);
+        const sweep = series[iB].A - series[iA].A; // signed full downswing arc
+        if (Math.abs(sweep) >= 12) {
+          runMag = Math.abs(sweep);
+          shotDeg = Math.max(-170, Math.min(170, sweep * 0.72));
+          const tRev = series[iA].t, tEnd = series[iB].t;
+          swingTime = tEnd > tRev ? tRev + 0.5 * (tEnd - tRev) : tRev;
         }
       }
     }

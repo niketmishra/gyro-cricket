@@ -1,7 +1,7 @@
-import * as audio from "./audio.js?v=22";
-import * as sensors from "./sensors.js?v=22";
-import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS, idealShotDeg } from "./physics.js?v=22";
-import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=22";
+import * as audio from "./audio.js?v=23";
+import * as sensors from "./sensors.js?v=23";
+import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS, idealShotDeg } from "./physics.js?v=23";
+import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=23";
 
 /* ============================== settings ============================== */
 const settings = loadJSON("gyroCricketSettings", {
