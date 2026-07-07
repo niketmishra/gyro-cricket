@@ -1,7 +1,7 @@
-import * as audio from "./audio.js?v=20";
-import * as sensors from "./sensors.js?v=20";
-import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS, idealShotDeg } from "./physics.js?v=20";
-import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=20";
+import * as audio from "./audio.js?v=21";
+import * as sensors from "./sensors.js?v=21";
+import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS, idealShotDeg } from "./physics.js?v=21";
+import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=21";
 
 /* ============================== settings ============================== */
 const settings = loadJSON("gyroCricketSettings", {
@@ -604,10 +604,10 @@ async function runDelivery(delivery, intent) {
   setTimeout(() => { setCue("SWING!", true); vibrate(30); }, delivery.toBounce * 1000);
   startTimingRing(tRelease, tBounce, tContact);
 
-  // listen across the WHOLE human swing: backlift (300-500ms) + downswing
-  // (150-350ms) + follow-through. Nothing gets clipped.
-  const windowStart = tContact - effWindow * 1000 - 900;
-  const windowEnd = tContact + effWindow * 1000 + 500;
+  // capture EVERYTHING: full backlift through full follow-through,
+  // 1.4s before the ball to 0.7s after
+  const windowStart = tContact - effWindow * 1000 - 1400;
+  const windowEnd = tContact + effWindow * 1000 + 700;
   let swing = match.buttonMode
     ? await buttonSwing(windowEnd)
     : await sensors.armSwing(windowStart, windowEnd, diff.threshold, tContact);

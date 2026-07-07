@@ -93,7 +93,7 @@ function onOrientation(e) {
     hX: hm(X), hY: hm(Y), hZ: hm(Z),
   };
   state.ori.push(s);
-  if (state.ori.length > 260) state.ori.shift();
+  if (state.ori.length > 400) state.ori.shift();
   state.oriOk = true;
 
   // live "where the bat points" for the needle
@@ -154,7 +154,7 @@ function onMotion(e) {
   if (!a || a.done) return;
   if (now < a.start) return;
   a.samples.push({ t: now, rot, acc, rx: r.beta || 0, ry: r.gamma || 0, rz: r.alpha || 0 });
-  if (a.samples.length > 700) a.samples.shift();
+  if (a.samples.length > 1000) a.samples.shift();
 
   if (a.resolveOnBurst) {
     if (a.lastT != null) a.angleAcc = (a.angleAcc || 0) + rot * (now - a.lastT) / 1000;
@@ -199,18 +199,22 @@ function analyze(a) {
   }
 
   // ---- DIRECTION + TIMING from the fused-orientation trajectory ----
+  // Judge the shot by the ENTIRE swing: find every sustained rotation run
+  // in the whole window, pick the downswing (fast, big, near the ball's
+  // arrival — the backswing is slower and earlier, so it loses), and the
+  // shot direction is that run's full start-to-end travel. Because it is
+  // pure relative motion, stance errors cannot touch it.
   let shotDeg = null, swingTime = null, runMag = 0;
   if (a.stance && state.oriOk) {
     const k = bestAxis(a.stance);
     const key = "az" + k;
-    // unwrapped azimuth series across the whole listening window
     const series = [];
     let prev = null, off = 0;
     for (const o of state.ori) {
-      if (o.t < a.start - 400 || o.t > a.end) continue;
+      if (o.t < a.start - 600 || o.t > a.end) continue;
       let v = o[key];
       if (prev != null) {
-        let d = v + off - prev;
+        const d = v + off - prev;
         if (d > 180) off -= 360;
         else if (d < -180) off += 360;
       }
@@ -219,44 +223,49 @@ function analyze(a) {
       prev = u;
     }
     if (series.length > 6) {
-      const A0 = wrapNear(a.stance[key], series[0].A);
-      // find the biggest sustained monotonic run (the downswing):
-      // velocity above 50 deg/s, small dips tolerated
-      let best = null, runStart = 0;
+      // find every sustained monotonic run
+      const runs = [];
       let i = 1;
       while (i < series.length) {
-        const dir = Math.sign(series[i].A - series[i - 1].A) || 1;
-        runStart = i - 1;
-        let j = i, slow = 0;
+        const dt0 = (series[i].t - series[i - 1].t) / 1000 || 0.016;
+        const v0 = (series[i].A - series[i - 1].A) / dt0;
+        if (Math.abs(v0) <= 45) { i++; continue; }
+        const dir = Math.sign(v0);
+        const i0 = i - 1;
+        let j = i, slow = 0, peakVel = Math.abs(v0);
         while (j < series.length) {
           const dt = (series[j].t - series[j - 1].t) / 1000 || 0.016;
           const v = (series[j].A - series[j - 1].A) / dt;
-          if (Math.sign(v) === dir && Math.abs(v) > 50) slow = 0;
-          else if (++slow > 2) break;
+          if (Math.sign(v) === dir && Math.abs(v) > 45) {
+            slow = 0;
+            if (Math.abs(v) > peakVel) peakVel = Math.abs(v);
+          } else if (++slow > 3) break;
           j++;
         }
-        const delta = series[Math.min(j - 1, series.length - 1)].A - series[runStart].A;
-        if (!best || Math.abs(delta) > Math.abs(best.delta)) {
-          best = { i0: runStart, i1: Math.min(j - 1, series.length - 1), delta };
+        const i1 = Math.min(j - 1, series.length - 1);
+        const delta = series[i1].A - series[i0].A;
+        if (Math.abs(delta) >= 20) {
+          runs.push({
+            i0, i1, delta, peakVel,
+            tMid: (series[i0].t + series[i1].t) / 2,
+          });
         }
         i = Math.max(j, i + 1);
       }
-      if (best && Math.abs(best.delta) >= 22) {
-        runMag = Math.abs(best.delta);
-        const tRev = series[best.i0].t, tEnd = series[best.i1].t;
+      // the downswing: big, FAST, and close to when the ball arrives
+      let bestRun = null, bestScore = 0;
+      for (const r2 of runs) {
+        const score = Math.abs(r2.delta) *
+          (1 - Math.min(0.65, Math.abs(r2.tMid - a.tContact) / 1100)) *
+          (0.6 + 0.4 * Math.min(1, r2.peakVel / 400));
+        if (score > bestScore) { bestScore = score; bestRun = r2; }
+      }
+      if (bestRun) {
+        runMag = Math.abs(bestRun.delta);
+        const tRev = series[bestRun.i0].t, tEnd = series[bestRun.i1].t;
         swingTime = tRev + 0.45 * (tEnd - tRev);
-        // where does the bat POINT when the ball arrives?
-        let Ac;
-        if (a.tContact <= series[0].t) Ac = series[0].A;
-        else if (a.tContact >= series[series.length - 1].t) Ac = series[series.length - 1].A;
-        else {
-          let m = 0;
-          while (m < series.length - 1 && series[m + 1].t < a.tContact) m++;
-          const s0 = series[m], s1 = series[Math.min(m + 1, series.length - 1)];
-          const f = s1.t > s0.t ? (a.tContact - s0.t) / (s1.t - s0.t) : 0;
-          Ac = s0.A + (s1.A - s0.A) * f;
-        }
-        shotDeg = Math.max(-170, Math.min(170, wrap180(Ac - A0)));
+        // the shot = the whole swing's travel
+        shotDeg = Math.max(-170, Math.min(170, bestRun.delta * 0.85));
       }
     }
   }
