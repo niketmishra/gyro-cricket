@@ -141,40 +141,52 @@ function analyze(a) {
     // waggle filter: too weak, too small a sweep, or too brief
     if (peak < a.threshold || angle < 55 || b.t1 - b.t0 < 40) continue;
 
-    // stable contact anchor: the raw rotation peak drifts with swing shape,
-    // so blend it with the moment the bat has swept 40% of its arc
-    let cum = 0, t40 = tPeak, prevT2 = null;
-    for (const s of b.samples) {
-      if (prevT2 != null) cum += s.rot * (s.t - prevT2) / 1000;
-      prevT2 = s.t;
-      if (cum >= angle * 0.4) { t40 = s.t; break; }
-    }
-    const tSwing = tPeak * 0.5 + t40 * 0.5;
-
-    // THE DIRECTION, from the WHOLE swing. Accumulate the signed
-    // horizontal sweep S(t) = integral of yaw-rate across the entire burst,
-    // then take the full excursion between its two extremes: that segment
-    // IS the downswing, from backswing reversal to follow-through, however
-    // long or short the swing was. No time-window guessing.
-    let S = 0, minS = 0, maxS = 0, iMin = 0, iMax = 0, prevS = null, idx = 0;
-    for (const s of b.samples) {
+    // THE BAT IS A CLOCK HAND. Build the swing's horizontal trajectory
+    // S(t) = cumulative signed yaw sweep across the whole burst. Its two
+    // extremes are the backswing reversal and the follow-through end.
+    // The shot direction = where the hand points when the ball ARRIVES:
+    // S(tContact) - S(reversal), read off the real trajectory, ~1:1.
+    const Svals = [];
+    let S = 0, minS = 0, maxS = 0, iMin = 0, iMax = 0, prevS = null;
+    for (let i = 0; i < b.samples.length; i++) {
+      const s = b.samples[i];
       if (prevS) {
         const yawRate = s.rx * g.x + s.ry * g.y + s.rz * g.z; // deg/s, signed
         S += yawRate * (s.t - prevS.t) / 1000;
       }
       prevS = s;
-      if (S < minS) { minS = S; iMin = idx; }
-      if (S > maxS) { maxS = S; iMax = idx; }
-      idx++;
+      Svals.push(S);
+      if (S < minS) { minS = S; iMin = i; }
+      if (S > maxS) { maxS = S; iMax = i; }
     }
-    // the later extreme is where the downswing finished
-    const sweep = iMax > iMin ? maxS - minS : -(maxS - minS);
-    // ball departs along the tangent near mid-arc: about half the sweep
-    const swingDirDeg = Math.max(-120, Math.min(120, -sweep * 0.55));
+    const iStart = Math.min(iMin, iMax), iEnd = Math.max(iMin, iMax);
+    const tRev = b.samples[iStart].t, tEndT = b.samples[iEnd].t;
+    const sweepFull = Svals[iEnd] - Svals[iStart]; // signed full downswing arc
 
-    const score = angle * (1 - Math.min(0.6, Math.abs(tSwing - a.tContact) / 900));
+    // where was the bat when the ball reached the stumps?
+    let sAtBall;
+    if (a.tContact <= tRev) sAtBall = 0;
+    else if (a.tContact >= tEndT) sAtBall = sweepFull;
+    else {
+      let j = iStart;
+      while (j < iEnd && b.samples[j + 1].t < a.tContact) j++;
+      const s0 = b.samples[j], s1 = b.samples[Math.min(j + 1, iEnd)];
+      const f = s1.t > s0.t ? (a.tContact - s0.t) / (s1.t - s0.t) : 0;
+      sAtBall = (Svals[j] + (Svals[Math.min(j + 1, iEnd)] - Svals[j]) * f) - Svals[iStart];
+    }
+    const swingDirDeg = Math.max(-170, Math.min(170, -sAtBall * 0.95));
+
+    // TIMING FROM THE SWING ITSELF: the meat of the arc is ~45% through
+    // its own duration. A long flowing swing has a naturally wide sweet
+    // window; a stab has a narrow one.
+    const horizontalEnough = Math.abs(sweepFull) >= 25;
+    const swingTime = horizontalEnough
+      ? tRev + 0.45 * (tEndT - tRev)
+      : tPeak; // vertical drives: the rotation peak is the contact moment
+
+    const score = angle * (1 - Math.min(0.6, Math.abs(swingTime - a.tContact) / 900));
     if (!best || score > best.score) {
-      best = { score, peak, tSwing, accPeak, angle, swingDirDeg, sweep };
+      best = { score, peak, swingTime, accPeak, angle, swingDirDeg, sweepFull };
     }
   }
   if (!best) return null;
@@ -183,13 +195,14 @@ function analyze(a) {
   const accPow = clamp01((best.accPeak - 4) / 20);
   const power = Math.min(1, Math.max(accPow, rotPow * 0.72 + accPow * 0.45));
   return {
-    time: best.tSwing,
+    time: best.swingTime,
     power,
     batSpeedKmh: Math.round(28 + power * 117),
     tilt: state.lastTilt,
     swingDirDeg: best.swingDirDeg,
+    sweepFullDeg: -best.sweepFull, // full arc, internal sign (+ = OFF)
     azimuth: Math.max(-1, Math.min(1, best.swingDirDeg / 90)),
-    horizFrac: Math.min(1, Math.abs(best.sweep) / Math.max(40, best.angle)),
+    horizFrac: Math.min(1, Math.abs(best.sweepFull) / Math.max(40, best.angle)),
     rotPeak: best.peak,
     swingAngleDeg: Math.round(best.angle),
     source: "motion",

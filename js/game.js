@@ -1,7 +1,7 @@
-import * as audio from "./audio.js?v=18";
-import * as sensors from "./sensors.js?v=18";
-import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS, idealShotDeg } from "./physics.js?v=18";
-import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=18";
+import * as audio from "./audio.js?v=19";
+import * as sensors from "./sensors.js?v=19";
+import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS, idealShotDeg } from "./physics.js?v=19";
+import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=19";
 
 /* ============================== settings ============================== */
 const settings = loadJSON("gyroCricketSettings", {
@@ -303,7 +303,7 @@ async function runCalibration() {
     for (let attempt = 0; attempt < 3; attempt++) {
       copy.innerHTML = "🏏 <b>CALIBRATION.</b> Hold the phone like a bat. Now swing FLAT along the <b style=\"color:#ffd54a\">dotted gold line</b> — one full shadow swing to YOUR RIGHT. Watch the green needle follow you.";
       const sw = await sensors.captureSwing(9000, 170);
-      const calDeg = sw ? (sw.swingDirDeg ?? (sw.azimuth || 0) * 90) : 0;
+      const calDeg = sw ? (sw.sweepFullDeg ?? sw.swingDirDeg ?? (sw.azimuth || 0) * 90) : 0;
       lastRead = sw ? calDeg : null;
       if (sw && Math.abs(calDeg) >= 25) {
         settings.gyroSign = calDeg >= 0 ? 1 : -1;
@@ -604,8 +604,9 @@ async function runDelivery(delivery, intent) {
   setTimeout(() => { setCue("SWING!", true); vibrate(30); }, delivery.toBounce * 1000);
   startTimingRing(tRelease, tBounce, tContact);
 
-  const windowStart = tContact - effWindow * 1000 - 150;
-  const windowEnd = tContact + effWindow * 1000 + 120;
+  // listen WIDE: catch the whole swing, backswing through follow-through
+  const windowStart = tContact - effWindow * 1000 - 500;
+  const windowEnd = tContact + effWindow * 1000 + 350;
   let swing = match.buttonMode
     ? await buttonSwing(windowEnd)
     : await sensors.armSwing(windowStart, windowEnd, diff.threshold, tContact);
@@ -623,6 +624,7 @@ async function runDelivery(delivery, intent) {
       const sgn = settings.gyroSign || 1;
       if (swing.azimuth != null) swing.azimuth *= sgn;
       if (swing.swingDirDeg != null) swing.swingDirDeg *= sgn;
+      if (swing.sweepFullDeg != null) swing.sweepFullDeg *= sgn;
     }
     if (swing.source === "motion") {
       // rhythm-game latency correction: remove this device's constant lag

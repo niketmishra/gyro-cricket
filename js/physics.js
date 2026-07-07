@@ -196,15 +196,16 @@ export function computeShot(swing, diff, rightHanded = true, delivery = null, in
      how sweetly it comes off. The ball's line drags the shot and trims
      quality; it only causes an air-swing when your timing was poor too,
      because a batter in position gets bat on ball. */
-  const rotRate = swing.rotPeak || 500;
-  // response curve: moderate side-swipes still reach square positions
+  // the shot direction IS the swing read: where the bat pointed when the
+  // ball arrived. Timing no longer rotates the face separately; it is
+  // already baked into the at-ball reading.
   const swingAng = swing.swingDirDeg != null
-    ? clamp(swing.swingDirDeg, -115, 115)
+    ? clamp(swing.swingDirDeg, -170, 170)
     : Math.sign(az) * Math.min(95, Math.pow(Math.abs(az), 0.7) * 105);
-  const faceDeg = swingAng + clamp(err * rotRate * 0.35, -35, 35);
-  swing.swingAng = swingAng; // exposed so the UI can show what we read
+  const faceDeg = swingAng;
+  swing.swingAng = swingAng;
   swing.faceDeg = faceDeg;
-  const faceRad = (faceDeg * Math.PI) / 180;
+  const faceRad = (clamp(faceDeg, -90, 90) * Math.PI) / 180;
   const coverX = Math.sin(faceRad) * 1.05;  // sweet-spot reach (m)
   const ballX = line.xOff * 1.15;           // ball's line (m)
   const offset = ballX - coverX;
@@ -263,9 +264,8 @@ export function computeShot(swing, diff, rightHanded = true, delivery = null, in
   // direction: the swing rules; drag, movement and scratch-noise nudge
   let dir =
     faceDeg +
-    drag +
-    move.dirShift * (0.2 + 0.5 * (1 - quality)) +
-    (Math.random() * 7 - 3.5) * (1.1 - quality);
+    drag * 0.6 +
+    (Math.random() * 6 - 3) * (1.05 - quality);
   dir = ((dir + 540) % 360) - 180;
   dir = hand(dir, rightHanded);
   const glance = Math.abs(dir) > 105;
