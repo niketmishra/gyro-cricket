@@ -1,7 +1,7 @@
-import * as audio from "./audio.js?v=19";
-import * as sensors from "./sensors.js?v=19";
-import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS, idealShotDeg } from "./physics.js?v=19";
-import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=19";
+import * as audio from "./audio.js?v=20";
+import * as sensors from "./sensors.js?v=20";
+import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS, idealShotDeg } from "./physics.js?v=20";
+import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=20";
 
 /* ============================== settings ============================== */
 const settings = loadJSON("gyroCricketSettings", {
@@ -277,8 +277,8 @@ async function runCalibration() {
     cctx.fillText("SWING HERE ↗", gx + Math.sin(ta) * R * 0.55, gy - Math.cos(ta) * R * 0.55 - 14);
     // your live swing, mirrored on the needle in real time
     const lm = sensors.liveMotion();
-    if (lm.rot > 50) {
-      const deg = Math.max(-90, Math.min(90, -(lm.yaw || 0) * 0.2));
+    if (lm.pointDeg != null || lm.rot > 50) {
+      const deg = Math.max(-90, Math.min(90, lm.pointDeg != null ? lm.pointDeg : -(lm.yaw || 0) * 0.2));
       const a2 = (deg * Math.PI) / 180;
       cctx.save();
       cctx.shadowColor = "rgba(182,255,59,.9)";
@@ -604,9 +604,10 @@ async function runDelivery(delivery, intent) {
   setTimeout(() => { setCue("SWING!", true); vibrate(30); }, delivery.toBounce * 1000);
   startTimingRing(tRelease, tBounce, tContact);
 
-  // listen WIDE: catch the whole swing, backswing through follow-through
-  const windowStart = tContact - effWindow * 1000 - 500;
-  const windowEnd = tContact + effWindow * 1000 + 350;
+  // listen across the WHOLE human swing: backlift (300-500ms) + downswing
+  // (150-350ms) + follow-through. Nothing gets clipped.
+  const windowStart = tContact - effWindow * 1000 - 900;
+  const windowEnd = tContact + effWindow * 1000 + 500;
   let swing = match.buttonMode
     ? await buttonSwing(windowEnd)
     : await sensors.armSwing(windowStart, windowEnd, diff.threshold, tContact);
@@ -1922,8 +1923,10 @@ function drawSwingGauge(w, h) {
   }
   if (!match.buttonMode) {
     const lm = sensors.liveMotion();
-    if (lm.rot > 60) {
-      let azv = -(lm.yaw || 0) * 0.22 * (settings.gyroSign || 1); // deg/s -> display degrees
+    if (lm.pointDeg != null || lm.rot > 60) {
+      let azv = lm.pointDeg != null
+        ? lm.pointDeg * (settings.gyroSign || 1)                  // where the bat points
+        : -(lm.yaw || 0) * 0.22 * (settings.gyroSign || 1);       // fallback: rate
       if (!settings.rightHanded) azv = -azv;
       const tip = toXY(Math.max(-100, Math.min(100, azv)), R - 14);
       fctx.save();

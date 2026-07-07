@@ -1,19 +1,26 @@
-// Swing detection from the phone's accelerometer + gyroscope.
+// Swing detection, rebuilt on the phone's own fused orientation.
 //
-// The detector records EVERY gyro sample inside the contact window, then
-// analyses them as swing "bursts". A real bat swing sweeps a large angle
-// (integrated rotation > ~55 degrees); a nervous pre-ball bat tap does not,
-// so waggles are rejected. When several bursts qualify, the one that is
-// biggest AND closest to the ball's arrival wins — so moving the bat before
-// the ball comes never steals the shot.
+// WHY: direction used to come from raw gyro dotted with a gravity estimate
+// low-passed from the accelerometer. During a swing the accelerometer reads
+// gravity PLUS several g of swing acceleration, so the "gravity" reference
+// was garbage whenever it mattered — identical swings could read left or
+// right at random. The OS already runs professional sensor fusion
+// (deviceorientation): drift-corrected orientation that stays true while
+// you swing. We use THAT.
 //
-// Each swing yields: when its rotation peaked (contact moment), how hard
-// (peak rate + linear acceleration), its plane (horizFrac), its signed
-// direction (azimuth: rotation axis vs gravity, -1 leg ... +1 off), and the
-// raw peak rotation rate (used by the physics to rotate the bat face when
-// you are early or late).
+// Model:
+//  - STANCE: while you stand still in the run-up, we capture where the
+//    phone points (fused) and true gravity.
+//  - We continuously track the horizontal azimuth of whichever phone axis
+//    is most horizontal in YOUR grip (any grip works).
+//  - SHOT DIRECTION = the bat's azimuth at the instant the ball arrives,
+//    relative to stance. Same swing, same answer, every time.
+//  - TIMING = the meat of your own swing arc (45% through it): long
+//    flowing swings get naturally wider timing windows than stabs.
+//  - POWER still comes from the gyro (what it is actually good at).
 
 const IOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+const D2R = Math.PI / 180;
 
 const state = {
   supported: typeof DeviceMotionEvent !== "undefined",
@@ -21,17 +28,21 @@ const state = {
   listening: false,
   armed: null,
   lastTilt: 30,
-  g: { x: 0, y: 9.8, z: 0 }, // low-passed gravity, phone frame
-  live: { rot: 0, az: 0, t: 0 },
+  g: { x: 0, y: 9.8, z: 0 },     // live low-pass (display only)
+  gStill: { x: 0, y: 9.8, z: 0 },// gravity captured while STILL (trustworthy)
+  stillSince: 0,
+  stance: null,                  // orientation sample captured while still
+  ori: [],                       // ring buffer of fused orientation samples
+  oriOk: false,
+  live: { rot: 0, az: 0, yaw: 0, pointDeg: null, t: 0 },
 };
 
 export function sensorsSupported() {
   return state.supported;
 }
 
-// most recent rotation sample, for the on-screen swing needle
 export function liveMotion() {
-  if (performance.now() - state.live.t > 160) return { rot: 0, az: 0, yaw: 0 };
+  if (performance.now() - state.live.t > 200) return { rot: 0, az: 0, yaw: 0, pointDeg: null };
   return state.live;
 }
 
@@ -58,47 +69,93 @@ function startListening() {
   if (state.listening) return;
   state.listening = true;
   window.addEventListener("devicemotion", onMotion);
-  window.addEventListener("deviceorientation", (e) => {
-    if (e.beta != null) state.lastTilt = e.beta;
-  });
+  window.addEventListener("deviceorientation", onOrientation);
 }
 
-function onMotion(e) {
-  // slow gravity estimate, always running (iOS reports the opposite sign)
-  const ag = e.accelerationIncludingGravity;
-  if (ag && ag.x != null) {
-    const s = IOS ? -1 : 1;
-    state.g.x = state.g.x * 0.92 + s * ag.x * 0.08;
-    state.g.y = state.g.y * 0.92 + s * ag.y * 0.08;
-    state.g.z = state.g.z * 0.92 + s * ag.z * 0.08;
-  }
+/* ---- fused orientation: azimuth of each device axis in the world ---- */
+function onOrientation(e) {
+  if (e.beta != null) state.lastTilt = e.beta;
+  if (e.alpha == null || e.beta == null || e.gamma == null) return;
+  const a = e.alpha * D2R, b = e.beta * D2R, gm = e.gamma * D2R;
+  const ca = Math.cos(a), sa = Math.sin(a);
+  const cb = Math.cos(b), sb = Math.sin(b);
+  const cg = Math.cos(gm), sg = Math.sin(gm);
+  // R = Rz(alpha) Rx(beta) Ry(gamma), device -> earth (x east, y north, z up)
+  // world coords of the device axes = columns of R
+  const X = { x: ca * cg - sa * sb * sg, y: sa * cg + ca * sb * sg, z: -cb * sg };
+  const Y = { x: -sa * cb, y: ca * cb, z: sb };
+  const Z = { x: ca * sg + sa * sb * cg, y: sa * sg - ca * sb * cg, z: cb * cg };
+  const az = (v) => Math.atan2(v.x, v.y) / D2R;      // horizontal azimuth
+  const hm = (v) => Math.hypot(v.x, v.y);            // how horizontal it is
+  const s = {
+    t: performance.now(),
+    azX: az(X), azY: az(Y), azZ: az(Z),
+    hX: hm(X), hY: hm(Y), hZ: hm(Z),
+  };
+  state.ori.push(s);
+  if (state.ori.length > 260) state.ori.shift();
+  state.oriOk = true;
 
+  // live "where the bat points" for the needle
+  if (state.stance) {
+    const k = bestAxis(state.stance);
+    const d = wrap180(s["az" + k] - state.stance["az" + k]);
+    state.live.pointDeg = d;
+    state.live.t = performance.now();
+  }
+}
+
+function bestAxis(sample) {
+  const hx = sample.hX, hy = sample.hY, hz = sample.hZ;
+  if (hy >= hx && hy >= hz) return "Y";
+  if (hz >= hx) return "Z";
+  return "X";
+}
+function wrap180(d) {
+  return ((d + 540) % 360) - 180;
+}
+
+/* ---- motion: stillness capture, power, live rot ---- */
+function onMotion(e) {
+  const ag = e.accelerationIncludingGravity;
+  const now = performance.now();
   const r = e.rotationRate || {};
-  const rot = Math.hypot(r.alpha || 0, r.beta || 0, r.gamma || 0); // deg/s
+  const rot = Math.hypot(r.alpha || 0, r.beta || 0, r.gamma || 0);
   const acc = e.acceleration
     ? Math.hypot(e.acceleration.x || 0, e.acceleration.y || 0, e.acceleration.z || 0)
     : 0;
 
-  // live swing feed for the on-screen needle.
-  // Physics: rotation-axis-dot-up > 0 means the bat sweeps counterclockwise
-  // seen from above, i.e. toward LEG for a right hander. Internally
-  // positive = OFF, hence the negation.
-  if (rot > 25) {
-    const gn = norm(state.g);
-    const yawRate = (r.beta || 0) * gn.x + (r.gamma || 0) * gn.y + (r.alpha || 0) * gn.z;
-    state.live = { rot, yaw: yawRate, az: Math.max(-1, Math.min(1, -yawRate / 350)), t: performance.now() };
+  if (ag && ag.x != null) {
+    const sg2 = IOS ? -1 : 1;
+    state.g.x = state.g.x * 0.9 + sg2 * ag.x * 0.1;
+    state.g.y = state.g.y * 0.9 + sg2 * ag.y * 0.1;
+    state.g.z = state.g.z * 0.9 + sg2 * ag.z * 0.1;
   }
+
+  // STILLNESS: the only time the accelerometer tells the truth about
+  // gravity, and the moment we trust as the batter's stance
+  if (rot < 35 && acc < 1.6) {
+    if (!state.stillSince) state.stillSince = now;
+    if (now - state.stillSince > 250) {
+      state.gStill = { ...state.g };
+      const last = state.ori[state.ori.length - 1];
+      if (last) state.stance = last;
+    }
+  } else {
+    state.stillSince = 0;
+  }
+
+  state.live.rot = rot;
+  if (!state.live.t || rot > 25) state.live.t = now;
+  const gn = norm(state.gStill);
+  state.live.yaw = (r.beta || 0) * gn.x + (r.gamma || 0) * gn.y + (r.alpha || 0) * gn.z;
 
   const a = state.armed;
   if (!a || a.done) return;
-  const now = performance.now();
   if (now < a.start) return;
-  if (!a.gRef) a.gRef = norm(state.g); // freeze gravity before the swing pollutes it
-
   a.samples.push({ t: now, rot, acc, rx: r.beta || 0, ry: r.gamma || 0, rz: r.alpha || 0 });
-  if (a.samples.length > 600) a.samples.shift();
+  if (a.samples.length > 700) a.samples.shift();
 
-  // calibration mode: finish as soon as one clean burst has completed
   if (a.resolveOnBurst) {
     if (a.lastT != null) a.angleAcc = (a.angleAcc || 0) + rot * (now - a.lastT) / 1000;
     a.lastT = now;
@@ -110,12 +167,10 @@ function onMotion(e) {
   }
 }
 
-// Split window samples into bursts and score them: a genuine swing sweeps
-// a big angle; the winner is the big burst nearest the ball's arrival.
+/* ---- analysis ---- */
 function analyze(a) {
+  // ---- POWER (and fallback timing) from the gyro bursts ----
   const gateRot = Math.max(90, a.threshold * 0.55);
-  const g = a.gRef || { x: 0, y: 1, z: 0 };
-
   const bursts = [];
   let cur = null;
   for (const s of a.samples) {
@@ -123,94 +178,120 @@ function analyze(a) {
       if (!cur) cur = { t0: s.t, t1: s.t, samples: [] };
       cur.samples.push(s);
       cur.t1 = s.t;
-    } else if (cur) {
-      if (s.t - cur.t1 > 70) { bursts.push(cur); cur = null; }
+    } else if (cur && s.t - cur.t1 > 90) {
+      bursts.push(cur); cur = null;
     }
   }
   if (cur) bursts.push(cur);
 
-  let best = null;
+  let gb = null; // best gyro burst
   for (const b of bursts) {
     let peak = 0, tPeak = 0, accPeak = 0, angle = 0, prevT = null;
     for (const s of b.samples) {
       if (s.rot > peak) { peak = s.rot; tPeak = s.t; }
       if (s.acc > accPeak) accPeak = s.acc;
-      if (prevT != null) angle += s.rot * (s.t - prevT) / 1000; // integrated degrees
+      if (prevT != null) angle += s.rot * (s.t - prevT) / 1000;
       prevT = s.t;
     }
-    // waggle filter: too weak, too small a sweep, or too brief
-    if (peak < a.threshold || angle < 55 || b.t1 - b.t0 < 40) continue;
+    if (peak < a.threshold || angle < 50 || b.t1 - b.t0 < 40) continue;
+    const score = angle * (1 - Math.min(0.6, Math.abs(tPeak - a.tContact) / 900));
+    if (!gb || score > gb.score) gb = { score, peak, tPeak, accPeak, angle };
+  }
 
-    // THE BAT IS A CLOCK HAND. Build the swing's horizontal trajectory
-    // S(t) = cumulative signed yaw sweep across the whole burst. Its two
-    // extremes are the backswing reversal and the follow-through end.
-    // The shot direction = where the hand points when the ball ARRIVES:
-    // S(tContact) - S(reversal), read off the real trajectory, ~1:1.
-    const Svals = [];
-    let S = 0, minS = 0, maxS = 0, iMin = 0, iMax = 0, prevS = null;
-    for (let i = 0; i < b.samples.length; i++) {
-      const s = b.samples[i];
-      if (prevS) {
-        const yawRate = s.rx * g.x + s.ry * g.y + s.rz * g.z; // deg/s, signed
-        S += yawRate * (s.t - prevS.t) / 1000;
+  // ---- DIRECTION + TIMING from the fused-orientation trajectory ----
+  let shotDeg = null, swingTime = null, runMag = 0;
+  if (a.stance && state.oriOk) {
+    const k = bestAxis(a.stance);
+    const key = "az" + k;
+    // unwrapped azimuth series across the whole listening window
+    const series = [];
+    let prev = null, off = 0;
+    for (const o of state.ori) {
+      if (o.t < a.start - 400 || o.t > a.end) continue;
+      let v = o[key];
+      if (prev != null) {
+        let d = v + off - prev;
+        if (d > 180) off -= 360;
+        else if (d < -180) off += 360;
       }
-      prevS = s;
-      Svals.push(S);
-      if (S < minS) { minS = S; iMin = i; }
-      if (S > maxS) { maxS = S; iMax = i; }
+      const u = v + off;
+      series.push({ t: o.t, A: u });
+      prev = u;
     }
-    const iStart = Math.min(iMin, iMax), iEnd = Math.max(iMin, iMax);
-    const tRev = b.samples[iStart].t, tEndT = b.samples[iEnd].t;
-    const sweepFull = Svals[iEnd] - Svals[iStart]; // signed full downswing arc
-
-    // where was the bat when the ball reached the stumps?
-    let sAtBall;
-    if (a.tContact <= tRev) sAtBall = 0;
-    else if (a.tContact >= tEndT) sAtBall = sweepFull;
-    else {
-      let j = iStart;
-      while (j < iEnd && b.samples[j + 1].t < a.tContact) j++;
-      const s0 = b.samples[j], s1 = b.samples[Math.min(j + 1, iEnd)];
-      const f = s1.t > s0.t ? (a.tContact - s0.t) / (s1.t - s0.t) : 0;
-      sAtBall = (Svals[j] + (Svals[Math.min(j + 1, iEnd)] - Svals[j]) * f) - Svals[iStart];
-    }
-    const swingDirDeg = Math.max(-170, Math.min(170, -sAtBall * 0.95));
-
-    // TIMING FROM THE SWING ITSELF: the meat of the arc is ~45% through
-    // its own duration. A long flowing swing has a naturally wide sweet
-    // window; a stab has a narrow one.
-    const horizontalEnough = Math.abs(sweepFull) >= 25;
-    const swingTime = horizontalEnough
-      ? tRev + 0.45 * (tEndT - tRev)
-      : tPeak; // vertical drives: the rotation peak is the contact moment
-
-    const score = angle * (1 - Math.min(0.6, Math.abs(swingTime - a.tContact) / 900));
-    if (!best || score > best.score) {
-      best = { score, peak, swingTime, accPeak, angle, swingDirDeg, sweepFull };
+    if (series.length > 6) {
+      const A0 = wrapNear(a.stance[key], series[0].A);
+      // find the biggest sustained monotonic run (the downswing):
+      // velocity above 50 deg/s, small dips tolerated
+      let best = null, runStart = 0;
+      let i = 1;
+      while (i < series.length) {
+        const dir = Math.sign(series[i].A - series[i - 1].A) || 1;
+        runStart = i - 1;
+        let j = i, slow = 0;
+        while (j < series.length) {
+          const dt = (series[j].t - series[j - 1].t) / 1000 || 0.016;
+          const v = (series[j].A - series[j - 1].A) / dt;
+          if (Math.sign(v) === dir && Math.abs(v) > 50) slow = 0;
+          else if (++slow > 2) break;
+          j++;
+        }
+        const delta = series[Math.min(j - 1, series.length - 1)].A - series[runStart].A;
+        if (!best || Math.abs(delta) > Math.abs(best.delta)) {
+          best = { i0: runStart, i1: Math.min(j - 1, series.length - 1), delta };
+        }
+        i = Math.max(j, i + 1);
+      }
+      if (best && Math.abs(best.delta) >= 22) {
+        runMag = Math.abs(best.delta);
+        const tRev = series[best.i0].t, tEnd = series[best.i1].t;
+        swingTime = tRev + 0.45 * (tEnd - tRev);
+        // where does the bat POINT when the ball arrives?
+        let Ac;
+        if (a.tContact <= series[0].t) Ac = series[0].A;
+        else if (a.tContact >= series[series.length - 1].t) Ac = series[series.length - 1].A;
+        else {
+          let m = 0;
+          while (m < series.length - 1 && series[m + 1].t < a.tContact) m++;
+          const s0 = series[m], s1 = series[Math.min(m + 1, series.length - 1)];
+          const f = s1.t > s0.t ? (a.tContact - s0.t) / (s1.t - s0.t) : 0;
+          Ac = s0.A + (s1.A - s0.A) * f;
+        }
+        shotDeg = Math.max(-170, Math.min(170, wrap180(Ac - A0)));
+      }
     }
   }
-  if (!best) return null;
 
-  const rotPow = clamp01((best.peak - a.threshold) / 400);
-  const accPow = clamp01((best.accPeak - 4) / 20);
+  // nothing usable at all?
+  if (!gb && shotDeg == null) return null;
+
+  const peak = gb ? gb.peak : 300 + runMag * 3;
+  const accPeak = gb ? gb.accPeak : 8;
+  const rotPow = clamp01((peak - a.threshold) / 400);
+  const accPow = clamp01((accPeak - 4) / 20);
   const power = Math.min(1, Math.max(accPow, rotPow * 0.72 + accPow * 0.45));
+
   return {
-    time: best.swingTime,
+    time: swingTime ?? (gb ? gb.tPeak : a.tContact),
     power,
     batSpeedKmh: Math.round(28 + power * 117),
     tilt: state.lastTilt,
-    swingDirDeg: best.swingDirDeg,
-    sweepFullDeg: -best.sweepFull, // full arc, internal sign (+ = OFF)
-    azimuth: Math.max(-1, Math.min(1, best.swingDirDeg / 90)),
-    horizFrac: Math.min(1, Math.abs(best.sweepFull) / Math.max(40, best.angle)),
-    rotPeak: best.peak,
-    swingAngleDeg: Math.round(best.angle),
+    swingDirDeg: shotDeg ?? 0,
+    sweepFullDeg: shotDeg ?? 0,
+    azimuth: shotDeg != null ? Math.max(-1, Math.min(1, shotDeg / 90)) : 0,
+    horizFrac: Math.min(1, runMag / Math.max(40, gb ? gb.angle : runMag || 1)),
+    rotPeak: peak,
+    swingAngleDeg: Math.round(gb ? gb.angle : runMag),
     source: "motion",
   };
 }
 
-// Arm detection for one delivery. Resolves at window end with the best
-// qualifying swing burst, or null.
+function wrapNear(target, ref) {
+  let v = target;
+  while (v - ref > 180) v -= 360;
+  while (v - ref < -180) v += 360;
+  return v;
+}
+
 export function armSwing(windowStart, windowEnd, threshold = 220, tContact = windowEnd - 250) {
   return new Promise((resolve) => {
     state.armed = {
@@ -220,7 +301,7 @@ export function armSwing(windowStart, windowEnd, threshold = 220, tContact = win
       tContact,
       resolve,
       samples: [],
-      gRef: null,
+      stance: state.stance, // locked at arm time: captured while STILL
       done: false,
     };
     const guard = () => {
@@ -237,13 +318,14 @@ export function armSwing(windowStart, windowEnd, threshold = 220, tContact = win
   });
 }
 
-// one-shot practice-swing capture for grip calibration; resolves as soon
-// as a genuine swing burst completes (or null after the timeout)
 export function captureSwing(durMs = 8000, threshold = 170) {
   const start = performance.now();
   const p = armSwing(start, start + durMs, threshold, start + durMs / 2);
   const a = state.armed;
-  if (a) a.resolveOnBurst = true;
+  if (a) {
+    a.resolveOnBurst = true;
+    a.stance = state.stance; // freshest stance
+  }
   return p;
 }
 
