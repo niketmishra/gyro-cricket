@@ -682,3 +682,5 @@ body.fire .fire-vignette { opacity: 1; }
 
 .tag-target { color: var(--gold); border-color: rgba(255,213,74,.45); background: rgba(255,213,74,.08); font-weight: 800; }
 .tag-target::before { display: none; }
+
+.cal-canvas { width: min(300px, 86%); margin: 0 auto; display: block; }

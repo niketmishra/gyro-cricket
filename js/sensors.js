@@ -151,22 +151,26 @@ function analyze(a) {
     }
     const tSwing = tPeak * 0.5 + t40 * 0.5;
 
-    // THE DIRECTION, done right: yaw-rate = omega·up is the horizontal
-    // component of rotation in deg/s. Integrating it across the downswing
-    // gives the REAL horizontal arc the bat swept, in signed degrees.
-    // A 70-degree cut reads as ~70 degrees. Vertical drives read ~0.
-    // (positive sweep = counterclockwise from above = toward LEG for a
-    // right hander; internal convention is positive = OFF, so negate.)
-    let sweep = 0, prevS = null;
+    // THE DIRECTION, from the WHOLE swing. Accumulate the signed
+    // horizontal sweep S(t) = integral of yaw-rate across the entire burst,
+    // then take the full excursion between its two extremes: that segment
+    // IS the downswing, from backswing reversal to follow-through, however
+    // long or short the swing was. No time-window guessing.
+    let S = 0, minS = 0, maxS = 0, iMin = 0, iMax = 0, prevS = null, idx = 0;
     for (const s of b.samples) {
-      if (s.t < t40 - 80 || s.t > tSwing + 130) { prevS = null; continue; }
       if (prevS) {
         const yawRate = s.rx * g.x + s.ry * g.y + s.rz * g.z; // deg/s, signed
-        sweep += yawRate * (s.t - prevS.t) / 1000;
+        S += yawRate * (s.t - prevS.t) / 1000;
       }
       prevS = s;
+      if (S < minS) { minS = S; iMin = idx; }
+      if (S > maxS) { maxS = S; iMax = idx; }
+      idx++;
     }
-    const swingDirDeg = Math.max(-115, Math.min(115, -sweep * 0.75));
+    // the later extreme is where the downswing finished
+    const sweep = iMax > iMin ? maxS - minS : -(maxS - minS);
+    // ball departs along the tangent near mid-arc: about half the sweep
+    const swingDirDeg = Math.max(-120, Math.min(120, -sweep * 0.55));
 
     const score = angle * (1 - Math.min(0.6, Math.abs(tSwing - a.tContact) / 900));
     if (!best || score > best.score) {

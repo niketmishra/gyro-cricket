@@ -1,7 +1,7 @@
-import * as audio from "./audio.js?v=17";
-import * as sensors from "./sensors.js?v=17";
-import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS, idealShotDeg } from "./physics.js?v=17";
-import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=17";
+import * as audio from "./audio.js?v=18";
+import * as sensors from "./sensors.js?v=18";
+import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS, idealShotDeg } from "./physics.js?v=18";
+import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=18";
 
 /* ============================== settings ============================== */
 const settings = loadJSON("gyroCricketSettings", {
@@ -249,30 +249,85 @@ $("btn-button-mode").addEventListener("click", () => { match.buttonMode = true; 
 async function runCalibration() {
   const copy = $("setup-copy");
   const b1 = $("btn-enable-motion"), b2 = $("btn-button-mode");
+  const cal = $("cal-canvas");
   b1.classList.add("hidden"); b2.classList.add("hidden");
-  for (let attempt = 0; attempt < 3; attempt++) {
-    copy.innerHTML = "🏏 <b>SHADOW SWING!</b> Hold the phone ANY way that feels like a bat. Now play ONE practice shot toward the <b>OFF side</b> (a right-hander's right).";
-    const sw = await sensors.captureSwing(8000, 170);
-    const calDeg = sw ? (sw.swingDirDeg ?? (sw.azimuth || 0) * 90) : 0;
-    if (sw && Math.abs(calDeg) >= 25) {
-      settings.gyroSign = calDeg >= 0 ? 1 : -1;
-      settings.gyroFlip = false;
-      saveSettings();
-      copy.textContent = "Locked in! That read clearly as your OFF side. Walking out to the middle...";
-      audio.playClaps();
-      await wait(1100);
-      b1.classList.remove("hidden"); b2.classList.remove("hidden");
-      return startMatch(pendingMode);
+  cal.classList.remove("hidden");
+  let calOn = true, lastRead = null;
+  const cctx = cal.getContext("2d");
+  const drawCal = () => {
+    if (!calOn) return;
+    const W = cal.width, H = cal.height, gx = W / 2, gy = H - 12, R = H - 34;
+    cctx.clearRect(0, 0, W, H);
+    cctx.strokeStyle = "rgba(242,246,255,.25)";
+    cctx.lineWidth = 5;
+    cctx.beginPath(); cctx.arc(gx, gy, R, Math.PI * 1.02, Math.PI * 1.98); cctx.stroke();
+    // the dotted gold target line: swing exactly along this
+    const ta = (45 * Math.PI) / 180;
+    cctx.setLineDash([5, 6]);
+    cctx.strokeStyle = "#ffd54a";
+    cctx.lineWidth = 3;
+    cctx.beginPath();
+    cctx.moveTo(gx, gy);
+    cctx.lineTo(gx + Math.sin(ta) * R, gy - Math.cos(ta) * R);
+    cctx.stroke();
+    cctx.setLineDash([]);
+    cctx.fillStyle = "#ffd54a";
+    cctx.font = "800 12px 'Space Grotesk', sans-serif";
+    cctx.textAlign = "center";
+    cctx.fillText("SWING HERE ↗", gx + Math.sin(ta) * R * 0.55, gy - Math.cos(ta) * R * 0.55 - 14);
+    // your live swing, mirrored on the needle in real time
+    const lm = sensors.liveMotion();
+    if (lm.rot > 50) {
+      const deg = Math.max(-90, Math.min(90, -(lm.yaw || 0) * 0.2));
+      const a2 = (deg * Math.PI) / 180;
+      cctx.save();
+      cctx.shadowColor = "rgba(182,255,59,.9)";
+      cctx.shadowBlur = 8;
+      cctx.strokeStyle = "#b6ff3b";
+      cctx.lineWidth = 4;
+      cctx.lineCap = "round";
+      cctx.beginPath(); cctx.moveTo(gx, gy);
+      cctx.lineTo(gx + Math.sin(a2) * (R - 8), gy - Math.cos(a2) * (R - 8));
+      cctx.stroke();
+      cctx.restore();
     }
-    copy.textContent = sw
-      ? "Felt it, but it read too straight to trust. Sweep FLAT across your body, like a big pull shot, toward the OFF side."
-      : "No swing felt. Give it a real shadow swing, like you mean it!";
-    await wait(1300);
+    if (lastRead != null) {
+      cctx.fillStyle = "#b6ff3b";
+      cctx.font = "800 14px 'Space Grotesk', sans-serif";
+      cctx.fillText(`READ: ${Math.round(Math.abs(lastRead))}°`, gx, 18);
+    }
+    nextFrame(drawCal);
+  };
+  nextFrame(drawCal);
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      copy.innerHTML = "🏏 <b>CALIBRATION.</b> Hold the phone like a bat. Now swing FLAT along the <b style=\"color:#ffd54a\">dotted gold line</b> — one full shadow swing to YOUR RIGHT. Watch the green needle follow you.";
+      const sw = await sensors.captureSwing(9000, 170);
+      const calDeg = sw ? (sw.swingDirDeg ?? (sw.azimuth || 0) * 90) : 0;
+      lastRead = sw ? calDeg : null;
+      if (sw && Math.abs(calDeg) >= 25) {
+        settings.gyroSign = calDeg >= 0 ? 1 : -1;
+        settings.gyroFlip = false;
+        saveSettings();
+        copy.textContent = `Locked in! Your swing read ${Math.abs(Math.round(calDeg))}° along the line. Walking out to the middle...`;
+        audio.playClaps();
+        await wait(1200);
+        return startMatch(pendingMode);
+      }
+      copy.textContent = sw
+        ? `Read only ${Math.abs(Math.round(calDeg))}° — too straight to trust. Sweep FLAT and FAR along the dotted line, like a big square cut.`
+        : "No swing felt. Give it a real shadow swing, like you mean it!";
+      await wait(1400);
+    }
+    settings.gyroSign = 1;
+    saveSettings();
+    startMatch(pendingMode);
+  } finally {
+    calOn = false;
+    cal.classList.add("hidden");
+    b1.classList.remove("hidden");
+    b2.classList.remove("hidden");
   }
-  settings.gyroSign = 1;
-  saveSettings();
-  b1.classList.remove("hidden"); b2.classList.remove("hidden");
-  startMatch(pendingMode);
 }
 
 /* duel setup */
