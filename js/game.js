@@ -1,7 +1,7 @@
-import * as audio from "./audio.js?v=23";
-import * as sensors from "./sensors.js?v=23";
-import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS, idealShotDeg } from "./physics.js?v=23";
-import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=23";
+import * as audio from "./audio.js?v=24";
+import * as sensors from "./sensors.js?v=24";
+import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS, idealShotDeg } from "./physics.js?v=24";
+import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=24";
 
 /* ============================== settings ============================== */
 const settings = loadJSON("gyroCricketSettings", {
@@ -43,6 +43,7 @@ const BATTERS = [
   { id: "ayar",     name: "S. AYAR",     tag: "The Pull King", emoji: "🎯", num: 41 },
   { id: "pante",    name: "R. PANTE",    tag: "The Entertainer", emoji: "🧤", num: 17 },
   { id: "pandar",   name: "H. PANDAR",   tag: "The Finisher", emoji: "💪", num: 33 },
+  { id: "dhenier",  name: "D. DHENIER",  tag: "Captain Cool", emoji: "🚁", num: 7 },
 ];
 const batterDef = () => BATTERS.find((b) => b.id === settings.batter) || BATTERS[0];
 if (!BATTERS.some((b) => b.id === settings.batter)) { settings.batter = "kholi"; saveSettings(); }
