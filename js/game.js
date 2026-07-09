@@ -1,7 +1,7 @@
-import * as audio from "./audio.js?v=24";
-import * as sensors from "./sensors.js?v=24";
-import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS, idealShotDeg } from "./physics.js?v=24";
-import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=24";
+import * as audio from "./audio.js?v=25";
+import * as sensors from "./sensors.js?v=25";
+import { computeShot, generateDelivery, regionName, difficultyConfig, fielderPositions, BOUNDARY, BOWLERS, INTENTS, idealShotDeg } from "./physics.js?v=25";
+import { pickLine, speak, setVoiceEnabled } from "./commentary.js?v=25";
 
 /* ============================== settings ============================== */
 const settings = loadJSON("gyroCricketSettings", {
@@ -44,6 +44,12 @@ const BATTERS = [
   { id: "pante",    name: "R. PANTE",    tag: "The Entertainer", emoji: "🧤", num: 17 },
   { id: "pandar",   name: "H. PANDAR",   tag: "The Finisher", emoji: "💪", num: 33 },
   { id: "dhenier",  name: "D. DHENIER",  tag: "Captain Cool", emoji: "🚁", num: 7 },
+  { id: "kower",    name: "H. KOWER",    tag: "Captain Fearless", emoji: "🦁", num: 84 },
+  { id: "mandana",  name: "S. MANDANA",  tag: "Cover Drive Queen", emoji: "🌊", num: 18 },
+  { id: "vermer",   name: "S. VERMER",   tag: "The Teen Tornado", emoji: "🎇", num: 17 },
+  { id: "rodrigs",  name: "J. RODRIGS",  tag: "The Livewire", emoji: "✨", num: 5 },
+  { id: "dsharmen", name: "D. SHARMEN",  tag: "The Crafty One", emoji: "🧠", num: 6 },
+  { id: "ghoshe",   name: "R. GHOSHE",   tag: "The Power Keeper", emoji: "💣", num: 13 },
 ];
 const batterDef = () => BATTERS.find((b) => b.id === settings.batter) || BATTERS[0];
 if (!BATTERS.some((b) => b.id === settings.batter)) { settings.batter = "kholi"; saveSettings(); }
