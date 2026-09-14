@@ -684,3 +684,39 @@ body.fire .fire-vignette { opacity: 1; }
 .tag-target::before { display: none; }
 
 .cal-canvas { width: min(300px, 86%); margin: 0 auto; display: block; }
+
+/* creator credit on the home screen */
+.creator {
+  z-index: 1;
+  margin-top: 16px;
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  color: var(--ink-dim);
+  font-size: 12.5px; font-weight: 500;
+  text-decoration: none;
+  transition: color .15s ease, border-color .15s ease;
+}
+.creator b { color: var(--ink); font-weight: 700; }
+.creator svg { color: #ff6fae; flex: none; }
+.creator:active { transform: scale(.97); }
+@media (hover: hover) { .creator:hover { color: var(--ink); border-color: rgba(255,111,174,.45); } }
+
+/* short phones: tighten the home screen so the credit never clips */
+@media (max-height: 740px) {
+  .home-head { margin-bottom: 8px; }
+  .logo-small { font-size: clamp(26px, 7.5vw, 36px); }
+  .home-sub { margin-top: 4px; font-size: 13.5px; }
+  .menu { gap: 7px; }
+  .menu-card { padding: 9px 14px; }
+  .menu-card .menu-icon { width: 38px; height: 38px; font-size: 19px; border-radius: 11px; }
+  .menu-text b { font-size: 15px; }
+  .menu-text small { font-size: 11.5px; }
+  .home-foot { margin-top: 10px; }
+  .home-foot .btn { padding: 10px 14px; font-size: 13px; }
+  .best-strip { margin-top: 8px; min-height: 0; }
+  .badge-shelf { margin-top: 6px; font-size: 18px; }
+  .creator { margin-top: 8px; padding: 6px 12px; font-size: 12px; }
+}
